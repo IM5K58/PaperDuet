@@ -127,6 +127,40 @@ def test_translate_keeps_valid_blocks_from_a_partial_batch(tmp_path):
     assert [b.ko for b in blocks] == [ko['b0001'], ko['b0002']]
 
 
+def test_translate_halves_a_batch_that_overflows_the_output_cap(tmp_path):
+    from m2_sample import seed
+    from paperduet.models import PipelineOptions
+    from paperduet.pipeline import Pipeline
+    from paperduet.provider import ProviderError
+    store, doc_id = seed(tmp_path)
+    doc = store.document(doc_id); sources = store.sources(doc_id)
+    blocks = [b.model_copy(update={'ko': None}) for b in doc.blocks if b.id in {'b0001', 'b0002'}]
+    ko = {'b0001': 'Nova를 제안하고 42.0을 보고한다. Table 1 참조.', 'b0002': '결과'}
+    class Overflow:
+        calls = []
+        def connected(self): return True
+        async def json(self, stage, model, payload, image=None):
+            ids = [b['id'] for b in payload['blocks']]
+            self.calls.append(ids)
+            if len(ids) > 1: raise ProviderError('AI_OUTPUT_LIMIT', usage={'tokens_in': 5, 'tokens_out': 16000})
+            return {'blocks': [{'id': i, 'ko': ko[i]} for i in ids]}, {}
+    provider = Overflow()
+    asyncio.run(Pipeline(store, provider).translate(doc_id, blocks, [], sources, PipelineOptions()))
+    # Without the split this batch would pause the job on every resume.
+    assert provider.calls == [['b0001', 'b0002'], ['b0001'], ['b0002']]
+    assert [b.ko for b in blocks] == [ko['b0001'], ko['b0002']]
+
+
+def test_glossary_keeps_usable_entries_instead_of_failing_the_job():
+    from paperduet.pipeline import parse_glossary
+    entry = {'term': 'Nova', 'ko': '노바', 'keep_english': True, 'definition_ko': '제안 모델.'}
+    answer = {'glossary': [entry, {**entry, 'term': 'nova'}, {'term': '', 'ko': 'x'}, 'noise',
+                           {'term': 'point', 'ko': '점', 'keep_english': False, 'definition_ko': '좌표.'}]}
+    assert [g.term for g in parse_glossary(answer)] == ['Nova', 'point']
+    assert parse_glossary([{**entry, 'term': f't{i}'} for i in range(90)])[-1].term == 't79'
+    assert parse_glossary('not json') == []
+
+
 def test_gemini_three_gets_thinking_level():
     _, body = APIProvider('google', None, None).body('gemini-3.8-flash', 'rules', [{'role': 'user', 'content': 'x'}], None, 'low')
     assert body['generationConfig']['thinkingConfig'] == {'thinkingLevel': 'low'}

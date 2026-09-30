@@ -11,6 +11,7 @@ from pydantic import Field
 from .models import Model, Block, Note
 from .provider import ProviderError
 from .providers import Redactor
+from .pipeline import compact, glossary_for
 
 DEFAULT_SYSTEM='''한국어로 질문에 먼저 답하세요. 묻지 않은 부연은 붙이지 마세요. 처음 쓰는 용어는 개념을 설명하세요.
 수식은 식이 하는 일, 기호별 의미, 의미하는 바를 구분하세요.
@@ -68,6 +69,24 @@ def utf16_slice(value,start,end):
 def public_block(block):
     return block.model_dump(exclude={'doc_id','order','image_path'},exclude_none=True)
 
+def source_block(block):
+    """English source only, as the translation prompts see it. Everything but the
+    selected block uses this: the Korean text, QA flags and table cell objects
+    roughly quadruple the tokens without telling the model anything new."""
+    item=compact(block)
+    if block.note:item['note']={'kind':block.note.kind,'title':block.note.title,'body_md':block.note.body_md}
+    return item
+
+def paper_blocks(blocks):
+    """The whole paper without AI notes; the section is named once per run."""
+    result=[];section=None
+    for b in blocks:
+        if b.note:continue
+        item=compact(b)
+        if b.section_path!=section:section=b.section_path;item['section']=' > '.join(section)
+        result.append(item)
+    return result
+
 def build_context(store,request,settings):
     doc=store.document(request.doc_id)
     if not doc: raise ValueError('DOCUMENT_NOT_FOUND')
@@ -80,7 +99,7 @@ def build_context(store,request,settings):
         except UnicodeError: raise ValueError('SELECTION_CHANGED') from None
         if anchor.end<=anchor.start or exact!=anchor.text: raise ValueError('SELECTION_CHANGED')
     i=next(i for i,b in enumerate(blocks) if b.id==block.id)
-    headings=[public_block(b) for b in blocks if b.type in {'sec','sub','ssub'} and b.section_path==block.section_path[:len(b.section_path)]]
+    headings=[source_block(b) for b in blocks if b.type in {'sec','sub','ssub'} and b.section_path==block.section_path[:len(b.section_path)]]
     neighbor_blocks=[b for b in blocks[max(0,i-settings.neighbors):i+settings.neighbors+1] if b.id!=block.id]
     text=json.dumps(public_block(block),ensure_ascii=False)
     references=[]
@@ -88,13 +107,19 @@ def build_context(store,request,settings):
         kind='tab' if name.lower().startswith('tab') else 'fig' if name.lower().startswith('fig') else 'eq'
         target=next((b for b in blocks if b.type==kind and re.search(r'(?<!\d)'+re.escape(num)+r'\)?$',b.n or '')),None)
         if target and target.id not in {b.id for b in references}: references.append(target)
-    abstract=[public_block(b) for b in blocks if any(p.lower()=='abstract' for p in b.section_path)]
+    abstract=[b for b in blocks if any(p.lower()=='abstract' for p in b.section_path) and not b.note]
     selected=public_block(block)
+    # Only glossary terms that occur in what is sent; definitions only for the
+    # terms in the selection itself. The full glossary alone outweighed the rest.
+    shown=[block,*neighbor_blocks,*references,*abstract]+(blocks if request.full_context else [])
+    texts=[t for b in shown for t in (b.en,b.caption_en,compact(b).get('table'))]
+    local={g['term'] for g in glossary_for(doc.glossary,[block.en,block.caption_en,anchor.text])}
+    # Stable, paper-wide parts first so providers' automatic prefix caching can reuse them.
     context={'metadata':{'title':doc.title,'title_ko':doc.title_ko,'arxiv_id':doc.arxiv_id,'authors':doc.authors},
-        'selection':anchor.model_dump(),'block':selected,'section_path':block.section_path,'headings':headings,
-        'neighbors':[public_block(b) for b in neighbor_blocks],'references':[public_block(b) for b in references],
-        'abstract':abstract,'glossary':doc.glossary}
-    if request.full_context: context['full_paper']=[public_block(b) for b in blocks]
+        'abstract':[source_block(b) for b in abstract],'glossary':glossary_for(doc.glossary,texts,local),
+        'section_path':block.section_path,'headings':headings,'selection':anchor.model_dump(),'block':selected,
+        'neighbors':[source_block(b) for b in neighbor_blocks],'references':[source_block(b) for b in references]}
+    if request.full_context: context['full_paper']=paper_blocks(blocks)
     image=None
     if request.include_image and block.image_path:
         path=store.asset_path(doc.id,block.image_path)
@@ -140,8 +165,17 @@ class AskService:
             history=[{'role':m['role'],'content':m['content_md']} for m in records if m['status']=='complete']
         context,image=build_context(self.store,request,settings)
         preset=next((p for p in settings.presets if p.id==request.preset),None)
-        system=settings.system+('\n이번 액션: '+preset.instruction if preset else '')
-        messages=history+[{'role':'user','content':json.dumps({'context':context,'question':request.question},ensure_ascii=False)}]
+        # The system prompt stays byte-identical across questions (the preset goes
+        # with the question), so the prefix below it can be cached.
+        system=settings.system
+        payload={'context':{k:v for k,v in context.items() if k!='full_paper'},'question':request.question}
+        if preset:payload['action']=preset.instruction
+        messages=history+[{'role':'user','content':json.dumps(payload,ensure_ascii=False)}]
+        if 'full_paper' in context:
+            # The paper always opens the conversation, marked cacheable: every
+            # question and follow-up on this paper shares system + paper as a prefix.
+            paper={'type':'text','text':json.dumps({'full_paper':context['full_paper']},ensure_ascii=False),'cache':True}
+            messages[0]={'role':'user','content':[paper,{'type':'text','text':messages[0]['content']}]}
         snapshot=json.loads(self.registry.redact(json.dumps({'system':system,'messages':messages,'context':context},ensure_ascii=False)))
         estimated=max(1,len(json.dumps(snapshot['messages'],ensure_ascii=False))//3)+len(system)//3+(1600 if image else 0)
         if estimated>250000: raise ValueError('CONTEXT_TOO_LARGE')

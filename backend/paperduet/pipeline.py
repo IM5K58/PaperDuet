@@ -6,7 +6,7 @@ import re
 import uuid
 from pathlib import Path
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field
 
 from .adapter import inline, parse_table, plain
 from .models import Model, PipelineOptions
@@ -39,6 +39,19 @@ class Translation(Model):
 
 class TranslationBatch(Model):
     blocks: list[Translation]
+
+
+def parse_glossary(result):
+    """Keep every usable entry. A short, duplicated or partly malformed glossary
+    only weakens consistency; rejecting it would stop the job with the same
+    answer on every resume."""
+    if isinstance(result,dict):result=next((v for v in result.values() if isinstance(v,list)),[])
+    glossary=[];seen=set()
+    for item in result if isinstance(result,list) else []:
+        try:entry=GlossaryEntry.model_validate(item)
+        except ValueError:continue
+        if entry.term.casefold() not in seen:seen.add(entry.term.casefold());glossary.append(entry)
+    return glossary[:80]
 
 
 def glossary_for(glossary, texts, definitions=()):
@@ -267,10 +280,7 @@ class Pipeline:
                 excerpt.append(plain(b.en));length+=len(excerpt[-1])
             result=await self.call(doc_id,'glossary',options.glossary_model,
                 {'title':doc.title,'excerpt':excerpt,'candidates':glossary_candidates(texts)})
-            glossary=TypeAdapter(list[GlossaryEntry]).validate_python(result)
-            minimum=30 if sum(len(b.en or '') for b in doc.blocks)>12000 else 1
-            if not minimum<=len(glossary)<=80 or len({g.term.casefold() for g in glossary})!=len(glossary):
-                raise ValueError('Invalid glossary')
+            glossary=parse_glossary(result)
             with self.store.connect() as db:
                 db.executemany('INSERT OR REPLACE INTO glossary VALUES(?,?,?,?,?)',[(doc_id,g.term,g.ko,g.keep_english,g.definition_ko) for g in glossary])
             done=list(dict.fromkeys(done+['Restore','Glossary']))
@@ -445,7 +455,16 @@ class Pipeline:
                     item['headers']=[{'row':ri,'col':ci,'text_en':c.text_en} for ri,row in enumerate(b.table.header) for ci,c in enumerate(row) if not c.numeric]
                 payload['blocks'].append(item)
             try:
-                data=TranslationBatch.model_validate(await self.call(doc_id,'translate',options.translate_model,payload))
+                try:
+                    data=TranslationBatch.model_validate(await self.call(doc_id,'translate',options.translate_model,payload))
+                except ProviderError as error:
+                    # A batch whose Korean overflows the output cap (or keeps coming
+                    # back malformed) would fail identically on every resume. Halve it.
+                    if str(error) not in {'AI_OUTPUT_LIMIT','AI_INVALID_JSON'} or len(pending)<2:raise
+                    half=len(pending)//2
+                    await self.translate(doc_id,pending[:half],glossary,sources,options)
+                    await self.translate(doc_id,pending[half:],glossary,sources,options)
+                    return
                 values={}
                 for v in data.blocks:values.setdefault(v.id,v)
                 for b in pending:

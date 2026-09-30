@@ -61,6 +61,21 @@ def test_ac7_context_exact_span_neighbors_references_abstract_and_full_paper(api
     assert image['image_attached'] and image['snapshot']['context']['image']['block_id']=='b0005'
     assert 'data:image' not in json.dumps(image)
 
+def test_context_is_source_only_and_full_paper_is_a_cacheable_prefix(api):
+    client,_,_,_=api
+    context=client.post('/ask/context',json=body()).json()['snapshot']['context']
+    assert context['block']['ko'] and all('ko' not in b and 'qa_flags' not in b for b in context['neighbors'])
+    full=client.post('/ask/context',json=body(full_context=True,preset='summary')).json()['snapshot']
+    paper,question=full['messages'][0]['content']
+    assert paper['cache'] and 'full_paper' in paper['text'] and 'full_paper' not in question['text']
+    # The preset rides with the question so the system prompt never varies.
+    assert '3문장' not in full['system'] and '3문장' in question['text']
+    _,request=APIProvider('anthropic',None,None).body('claude-sonnet-5',full['system'],full['messages'],None)
+    assert request['messages'][0]['content'][0]['cache_control']=={'type':'ephemeral'}
+    assert 'cache_control' not in request['messages'][0]['content'][1]
+    _,request=APIProvider('openai',None,None).body('gpt-5.4',full['system'],full['messages'],None)
+    assert [p['text'] for p in request['input'][0]['content']]==[paper['text'],question['text']]
+
 def test_ac7_equation_and_figure_reference_resolution_and_utf16(tmp_path):
     store,_=seed(tmp_path);doc=store.document('m2-paper');b=doc.blocks[1]
     b.en='😀 See Figure 1 and Eq. (1). Table 1.';store.save_blocks(doc.id,[b])

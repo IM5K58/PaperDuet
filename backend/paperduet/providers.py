@@ -31,6 +31,17 @@ class Redactor:
         return result
 
 
+def parts(content):
+    """Message content is a string or a list of text parts; a part marked
+    `cache` ends a stable prefix (Anthropic caches it explicitly, the other
+    providers cache identical prefixes on their own)."""
+    return content if isinstance(content, list) else [{'type': 'text', 'text': content}]
+
+
+def flat(content):
+    return '\n\n'.join(p['text'] for p in parts(content))
+
+
 def image_content(image):
     raw = image.read_bytes()
     if len(raw) > 5_000_000:
@@ -125,18 +136,19 @@ class APIProvider(StructuredAdapter):
         if not re.fullmatch(r'[a-zA-Z0-9_.:-]{1,100}',model): raise ProviderError('AI_REQUEST_FAILED')
         data=image_content(image) if image else None
         if self.id=='anthropic':
-            prepared=[{'role':m['role'],'content':[{'type':'text','text':m['content']}]} for m in messages]
+            prepared=[{'role':m['role'],'content':[{'type':'text','text':p['text'],**({'cache_control':{'type':'ephemeral'}} if p.get('cache') else {})}
+                for p in parts(m['content'])]} for m in messages]
             if data: prepared[-1]['content'].insert(0,{'type':'image','source':{'type':'base64','media_type':'image/png','data':data}})
             body={'model':model,'system':system,'messages':prepared,'max_tokens':16000,'stream':True}
             if effort and ANTHROPIC_EFFORT.match(model): body['output_config']={'effort':effort}
             return '/v1/messages',body
         if self.id=='openai':
-            prepared=[{'role':m['role'],'content':[{'type':'output_text' if m['role']=='assistant' else 'input_text','text':m['content']}]} for m in messages]
+            prepared=[{'role':m['role'],'content':[{'type':'output_text' if m['role']=='assistant' else 'input_text','text':p['text']} for p in parts(m['content'])]} for m in messages]
             if data: prepared[-1]['content'].append({'type':'input_image','image_url':'data:image/png;base64,'+data})
             body={'model':model,'instructions':system,'input':prepared,'max_output_tokens':16000,'stream':True,'store':False}
             if effort and OPENAI_REASONING.match(model): body['reasoning']={'effort':effort}
             return '/v1/responses',body
-        prepared=[{'role':'model' if m['role']=='assistant' else 'user','parts':[{'text':m['content']}]} for m in messages]
+        prepared=[{'role':'model' if m['role']=='assistant' else 'user','parts':[{'text':p['text']} for p in parts(m['content'])]} for m in messages]
         if data: prepared[-1]['parts'].append({'inlineData':{'mimeType':'image/png','data':data}})
         config={'maxOutputTokens':16000}
         if effort and re.match(r'gemini-[3-9]',model): config['thinkingConfig']={'thinkingLevel':effort}

@@ -13,7 +13,7 @@ import tempfile
 import time
 
 from .provider import ProviderError
-from .providers import StructuredAdapter, image_content
+from .providers import StructuredAdapter, flat, image_content
 
 
 def cli_enabled():
@@ -183,7 +183,7 @@ class CLIProvider(StructuredAdapter):
         required=['--tools','--strict-mcp-config','--setting-sources','--no-session-persistence'] if self.id=='anthropic' else ['--ignore-user-config','--ignore-rules','--ephemeral']
         if not all(flag in help_text for flag in required): raise ProviderError('CLI_UPDATE_REQUIRED')
         # The complete prompt, including user text and system policy, goes on stdin.
-        prompt=json.dumps({'system':system,'messages':messages},ensure_ascii=False)
+        prompt=json.dumps({'system':system,'messages':[{**m,'content':flat(m['content'])} for m in messages]},ensure_ascii=False)
         with tempfile.TemporaryDirectory(prefix='PaperDuet CLI 한글 ') as folder:
             if self.id=='anthropic':
                 args=['-p','--output-format','stream-json','--verbose','--include-partial-messages','--input-format','stream-json',
