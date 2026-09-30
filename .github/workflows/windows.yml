@@ -1,0 +1,70 @@
+name: Windows M4 export and installer smoke
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-m4:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PAPERDUET_VISUALAD_PDF: artifacts/m3/visualad.pdf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install dependencies and bundle Python runtime
+        shell: pwsh
+        run: ./scripts/setup.ps1
+      - name: Download independent golden PDF for acceptance tests
+        shell: pwsh
+        run: |
+          ./scripts/fetch-golden.ps1
+          ./scripts/fetch-visualad.ps1
+          ./scripts/fetch-arxiv-html.ps1
+      - name: Backend, PDF pipeline, checkpoints, credential isolation and golden acceptance tests
+        run: npm run test:backend
+      - name: Install browser
+        run: npx playwright install chromium
+      - name: Reader, Ask AI, arXiv, presentation notes and offline HTML at 390px
+        run: npm run test:e2e
+      - name: Windows job lifecycle and packaged sidecar tests
+        shell: pwsh
+        run: |
+          $env:PAPERDUET_TEST_SIDECAR = (Resolve-Path 'src-tauri/resources/backend/paperduet-backend.exe').Path
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Build NSIS installer
+        run: npx tauri build --bundles nsis
+      - name: Enforce installer size target
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe
+          if ($installer.Length -gt 150MB) { throw 'Installer exceeds 150 MiB' }
+      - name: Installed fixture and 48-page PDF; check bundled parser and process cleanup
+        # The smoke opens the Rex-Omni sample, which is not in the public repository.
+        if: hashFiles('fixtures/rex-omni.blocks.json') != ''
+        shell: pwsh
+        run: ./scripts/install-smoke.ps1 -Pdf artifacts/m1/rex-omni.pdf
+      - name: Upload installer and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperDuet-Windows-M4
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            playwright-report/
+            test-results/
+            artifacts/native-smoke/*.json
+            artifacts/native-smoke/*.png
+          if-no-files-found: warn

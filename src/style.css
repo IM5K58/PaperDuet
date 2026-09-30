@@ -1,0 +1,6 @@
+/* PaperDuet styles. Values come only from styles/tokens.css (DESIGN.md). */
+@import './styles/tokens.css';
+@import './styles/base.css';
+@import './styles/library.css';
+@import './styles/reader.css';
+@import './styles/panels.css';

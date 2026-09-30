@@ -1,0 +1,131 @@
+/* Design tokens from docs/DESIGN.md (A2 "Scholarly Hybrid"). Components reference only these variables. */
+:root {
+  color-scheme: light;
+  --primary: #1f3a5f;
+  --on-primary: #ffffff;
+  --primary-hover: #2a4c78;
+  --ink: #18181b;
+  --ink-soft: #333338;
+  --text-muted: #6b6b72;
+  --text-faint: #a1a1a8;
+  --canvas: #ffffff;
+  --canvas-soft: #f6f6f4;
+  --field: #f0f0ee;
+  --hairline-soft: #f0f0ee;
+  --hairline: #e6e6e3;
+  --accent: #1f3a5f;
+  --accent-soft: #e4eaf2;
+  --pair: #f5f5f2;
+  --overlay: rgba(24, 24, 27, .48);
+
+  /* Pills only for chips, badges, dots and progress bars. */
+  --r-none: 0;
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-full: 9999px;
+  --r-squircle: 8px;
+
+  --s-xxs: 4px;
+  --s-xs: 8px;
+  --s-sm: 12px;
+  --s-md: 16px;
+  --s-lg: 24px;
+  --s-xl: 32px;
+  --s-xxl: 48px;
+  --s-section: 80px;
+  --s-section-lg: 120px;
+  --control-h: 34px;
+  --control-h-sm: 30px;
+  --appbar-h: 56px;
+
+  /* Sans for interface, serif for the text being read. */
+  --font: 'Inter Variable', 'IBM Plex Sans KR', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --sans: var(--font);
+  --serif-en: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --serif-ko: 'Noto Serif KR', 'Source Serif 4', serif;
+  --w-heading: 700;
+  --w-text: 400;
+  --w-light: 300;
+  --w-strong: 600;
+  --ls-heading: -.02em;
+
+  --t-h1: 40px;        --lh-h1: 1.12;
+  --t-h2: 36px;        --lh-h2: 1.12;
+  --t-h3: 28px;        --lh-h3: 1.2;
+  --t-h4: 20px;        --lh-h4: 1.3;
+  --t-title: 17px;     --lh-title: 1.35;
+  --t-body-lg: 18px;   --lh-body-lg: 1.5;
+  --t-body: 15px;      --lh-body: 1.5;
+  --t-body-sm: 14px;   --lh-body-sm: 1.45;
+  --t-link: 15px;      --lh-link: 1.45;
+  --t-label: 12px;     --lh-label: 1.35;
+  --t-caption: 12px;   --lh-caption: 1.35;
+
+  /* Reading text follows the reader's font-size setting (--fs, 13–21px). */
+  --fs: 16px;
+  --read-en: calc(var(--fs) + 1px);  --lh-read-en: 1.65;
+  --read-ko: var(--fs);              --lh-read-ko: 1.85;
+
+  /* Annotation colours: user-approved exception to the single-accent palette. */
+  --key-bg: #fbf4e0; --key-bd: #b8860b; --key-ink: #6b4c00;
+  --res-bg: #eaf5ee; --res-bd: #2e7d4f; --res-ink: #0e5a2d;
+  --lim-bg: #fbece8; --lim-bd: #b5412e; --lim-ink: #7d2418;
+  --ins-bg: #edecfa; --ins-bd: #4f4ab8; --ins-ink: #32307d;
+  --mth-bg: #e6f3f3; --mth-bd: #1c7d82; --mth-ink: #08585c;
+  --trm-bg: #eef0f3; --trm-bd: #66707e; --trm-ink: #3c4655;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --primary: #9db6da;
+  --on-primary: #141a24;
+  --primary-hover: #b7cae6;
+  --ink: #ededef;
+  --ink-soft: #d6d6da;
+  --text-muted: #9e9ea6;
+  --text-faint: #6e6e76;
+  --canvas: #161618;
+  --canvas-soft: #1e1e21;
+  --field: #28282c;
+  --hairline-soft: #28282c;
+  --hairline: #34343a;
+  --accent: #9db6da;
+  --accent-soft: #26303d;
+  --pair: #1e1e21;
+  --overlay: rgba(0, 0, 0, .6);
+  --key-bg: #2e2717; --key-bd: #e0b84a; --key-ink: #f2d98a;
+  --res-bg: #1b2a21; --res-bd: #62c08a; --res-ink: #9ce3b5;
+  --lim-bg: #301d19; --lim-bd: #e97e6a; --lim-ink: #f5b0a3;
+  --ins-bg: #24233b; --ins-bd: #a29ef2; --ins-ink: #c3bffb;
+  --mth-bg: #17292a; --mth-bd: #56c2c7; --mth-ink: #95dfe3;
+  --trm-bg: #252a31; --trm-bd: #a6b0be; --trm-ink: #bac6d5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --primary: #9db6da;
+    --on-primary: #141a24;
+    --primary-hover: #b7cae6;
+    --ink: #ededef;
+    --ink-soft: #d6d6da;
+    --text-muted: #9e9ea6;
+    --text-faint: #6e6e76;
+    --canvas: #161618;
+    --canvas-soft: #1e1e21;
+    --field: #28282c;
+    --hairline-soft: #28282c;
+    --hairline: #34343a;
+    --accent: #9db6da;
+    --accent-soft: #26303d;
+    --pair: #1e1e21;
+    --overlay: rgba(0, 0, 0, .6);
+    --key-bg: #2e2717; --key-bd: #e0b84a; --key-ink: #f2d98a;
+    --res-bg: #1b2a21; --res-bd: #62c08a; --res-ink: #9ce3b5;
+    --lim-bg: #301d19; --lim-bd: #e97e6a; --lim-ink: #f5b0a3;
+    --ins-bg: #24233b; --ins-bd: #a29ef2; --ins-ink: #c3bffb;
+    --mth-bg: #17292a; --mth-bd: #56c2c7; --mth-ink: #95dfe3;
+    --trm-bg: #252a31; --trm-bd: #a6b0be; --trm-ink: #bac6d5;
+  }
+}
