@@ -30,6 +30,7 @@ export function Workspace() {
   const [docId,setDocId]=useState(initial.get('doc')||'rex-omni');
   const [items,setItems]=useState<LibraryItem[]>([]);
   const [selected,setSelected]=useState<string|null>(null);
+  const [removing,setRemoving]=useState<LibraryItem|null>(null);
   const [settings,setSettings]=useState(false);
   const [appSettings,setAppSettings]=useState(false);const [updateAvailable,setUpdateAvailable]=useState(false);
   useEffect(()=>{if(localStorage.getItem('paperduet-auto-update')!=='false')void invoke<{available?:boolean}>('check_update').then(u=>setUpdateAvailable(!!u.available)).catch(()=>{});},[]);
@@ -83,13 +84,14 @@ export function Workspace() {
         <div className="upload-icon"><Icon name="upload"/></div><h2>{uploading?<><span className="spinner" aria-hidden="true"/>PDF를 가져오고 있습니다…</>:'PDF를 여기에 놓으세요'}</h2><p>최대 150MB · 원본은 이 PC에 저장됩니다.</p><button className="primary-button" disabled={uploading} onClick={()=>input.current?.click()}>PDF 파일 선택</button><small>AI 연결 전에도 원문을 읽을 수 있습니다. 번역은 예상 사용량을 확인한 후 시작합니다.</small>
       </section>{arxiv}</>:recent&&<section className="continue-card" aria-label="이어 읽기"><div className="continue-cover" aria-hidden="true">{recent.title}</div><div className="continue-body"><span className="continue-label">이어 읽기</span><p className="continue-title">{recent.title}</p><p>{since(recent.opened_at)} 마지막으로 읽음</p></div><button className="primary-button" onClick={()=>navigate('reader',recent.id)}>이어서 읽기<Icon name="arrowRight"/></button></section>}
       <div className="library-section-title"><h2>저장한 논문 <span>{items.length}</span></h2><button onClick={()=>void refresh()}>새로고침</button></div>
-      <div className="paper-list">{items.map(item=>{const job=jobs.active[item.id];const status=job?.status??item.status;return <article className="paper-item" key={item.id}><div className="paper-item-content"><h3>{item.title}</h3><p>{item.status==='fixture'?'Rex-Omni · 대역과 주석이 준비된 샘플':`${item.page_count}쪽 · ${item.block_count}블록`}{item.opened_at?` · ${since(item.opened_at)} 읽음`:''}</p></div><span className={`state-badge state-${status}`}>{job&&<span className="spinner" aria-hidden="true"/>}{LABELS[status]??status}{job?` · ${Math.round(job.progress*100)}%`:''}</span><div className="paper-actions"><button disabled={!item.block_count} onClick={()=>navigate('reader',item.id)}>논문 열기</button>{item.status!=='fixture'&&<button onClick={()=>setSelected(item.id)}>처리 상태</button>}</div></article>;})}</div>
+      <div className="paper-list">{items.map(item=>{const job=jobs.active[item.id];const status=job?.status??item.status;return <article className="paper-item" key={item.id}><div className="paper-item-content"><h3>{item.title}</h3><p>{item.status==='fixture'?'Rex-Omni · 대역과 주석이 준비된 샘플':`${item.page_count}쪽 · ${item.block_count}블록`}{item.opened_at?` · ${since(item.opened_at)} 읽음`:''}</p></div><span className={`state-badge state-${status}`}>{job&&<span className="spinner" aria-hidden="true"/>}{LABELS[status]??status}{job?` · ${Math.round(job.progress*100)}%`:''}</span><div className="paper-actions"><button disabled={!item.block_count} onClick={()=>navigate('reader',item.id)}>논문 열기</button>{item.status!=='fixture'&&<button onClick={()=>setSelected(item.id)}>처리 상태</button>}<button className="icon-button paper-delete" aria-label={`${item.title} 삭제`} title="논문 삭제" onClick={()=>setRemoving(item)}><Icon name="trash"/></button></div></article>;})}</div>
       {!firstRun&&<section className="import-panel" aria-label="논문 가져오기"><div className="import-drop"><Icon name="upload"/><span><b>{uploading?'PDF를 가져오고 있습니다…':'PDF를 끌어다 놓거나'}</b> 파일을 선택하세요 · 최대 150MB</span><button disabled={uploading} onClick={()=>input.current?.click()}>PDF 파일 선택</button></div>{arxiv}</section>}
       {!guideSeen&&!firstRun&&tutorialLink}
       <p className="library-footnote">번역 언어는 한국어입니다. 참고문헌은 원문을 유지합니다.</p></main></div>}
     {selected&&<ProgressPanel docId={selected} onClose={()=>{setSelected(null);jobs.wake();void refresh();}} onRead={()=>{const id=selected;setSelected(null);navigate('reader',id);}} onSettings={()=>setSettings(true)}/>}
     <JobBanner active={Object.values(jobs.active)} settled={jobs.settled} hidden={selected} onOpen={id=>setSelected(id)} onRead={id=>navigate('reader',id)} onDismiss={jobs.dismiss}/>
     {onboarding&&<ProviderPanel onboarding hasSample={hasSample} onGuide={()=>navigate('tutorial')} onClose={()=>void finishOnboarding()} onComplete={()=>{void finishOnboarding();openSample();}}/>}
+    {removing&&<DeleteDialog item={removing} running={!!jobs.active[removing.id]} onClose={()=>setRemoving(null)} onDeleted={()=>{const id=removing.id;setRemoving(null);if(selected===id)setSelected(null);jobs.dismiss(id);void refresh();}}/>}
     {appSettings&&<AppSettings onClose={()=>setAppSettings(false)}/>}
     {settings&&<ProviderPanel onClose={()=>setSettings(false)}/>}
   </>;
@@ -108,7 +110,7 @@ function useJobTracker(onSettled:()=>void){
       const items=await request<LibraryItem[]>('/documents');const next:Record<string,Tracked>={};
       await Promise.all(items.filter(i=>ACTIVE.has(i.status)).map(async i=>{const job=await request<Job>(`/documents/${i.id}/job`).catch(()=>null);next[i.id]={id:i.id,title:i.title,status:job?.status??i.status,stage:job?.stage??'',progress:job?.progress??0};}));
       if(stopped)return;
-      const ended=Object.values(previous.current).filter(t=>!next[t.id]).map(t=>({...t,status:items.find(i=>i.id===t.id)?.status??'complete',progress:1}));
+      const ended=Object.values(previous.current).filter(t=>!next[t.id]&&items.some(i=>i.id===t.id)).map(t=>({...t,status:items.find(i=>i.id===t.id)?.status??'complete',progress:1}));
       if(ended.length){setSettled(list=>[...list.filter(s=>!ended.some(e=>e.id===s.id)),...ended]);settledRef.current();}
       previous.current=next;setActive(next);
     }catch{/* Sidecar not ready yet; retry on the next tick. */}
@@ -126,6 +128,19 @@ function JobBanner({active,settled,hidden,onOpen,onRead,onDismiss}:{active:Track
     {running.map(t=><div key={t.id} className="job-toast"><span className="spinner" aria-hidden="true"/><div className="job-toast-body"><b title={t.title}>{t.title}</b><span>{t.status==='queued'?'처리 대기':STAGES[t.stage]??t.stage} · {Math.round(t.progress*100)}%</span><progress aria-label={`${t.title} 처리 진행률`} max={1} value={t.progress}/></div><button onClick={()=>onOpen(t.id)}>자세히</button></div>)}
     {finished.map(t=><div key={t.id} className={`job-toast job-${t.status}`}><span className="job-icon" aria-hidden="true">{OK_STATES.has(t.status)?'✓':'!'}</span><div className="job-toast-body"><b title={t.title}>{t.title}</b><span>{DONE_TEXT[t.status]??LABELS[t.status]??t.status}</span></div>{t.status==='complete'||t.status==='review'?<button className="primary-button" onClick={()=>{onDismiss(t.id);onRead(t.id);}}>읽기</button>:<button onClick={()=>{onDismiss(t.id);onOpen(t.id);}}>{t.status==='ready_to_translate'||t.status==='awaiting_ai'?'번역 시작하기':'상태 보기'}</button>}<button className="job-close" aria-label="알림 닫기" onClick={()=>onDismiss(t.id)}><Icon name="close"/></button></div>)}
   </div>;
+}
+
+function DeleteDialog({item,running,onClose,onDeleted}:{item:LibraryItem;running:boolean;onClose:()=>void;onDeleted:()=>void}){
+  const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  const remove=async()=>{setBusy(true);setError('');try{await request(`/documents/${encodeURIComponent(item.id)}`,{method:'DELETE'});onDeleted();}catch(e){setError((e as Error).message);setBusy(false);}};
+  return <Modal title="논문 삭제" onClose={()=>{if(!busy)onClose();}}><div className="dialog-content">
+    <p className="delete-title">‘{item.title}’</p>
+    <p>이 논문을 서재에서 삭제할까요? 원문 PDF와 번역·주석, AI 대화, 발표 노트가 모두 지워지며 되돌릴 수 없습니다.</p>
+    {running&&<p>진행 중인 번역·주석 처리도 함께 중지됩니다.</p>}
+    {item.status==='fixture'&&<p>샘플 논문은 삭제하면 다시 불러올 수 없습니다.</p>}
+    {error&&<p role="alert" className="error-message">{error}</p>}
+    <div className="dialog-actions"><button className="danger-button" disabled={busy} onClick={()=>void remove()}>{busy&&<span className="spinner" aria-hidden="true"/>}삭제</button><button disabled={busy} onClick={onClose}>취소</button></div>
+  </div></Modal>;
 }
 
 const USAGE_STAGES:Record<string,string>={table:'표 복원',equation:'수식 복원',glossary:'용어집',translate:'전문 번역',annotate:'맥락 주석'};

@@ -16,6 +16,10 @@ button:disabled { color:var(--text-faint); background:var(--canvas); border-colo
 .secondary-button { color:var(--primary); border-color:var(--primary); }
 .secondary-button:hover { background:var(--accent-soft); }
 .secondary-button:disabled { color:var(--text-faint); border-color:var(--hairline); background:var(--canvas); }
+/* Irreversible actions (delete). Reuses the limitation-note red, which has a dark-mode pair. */
+.danger-button { background:var(--lim-bd); color:var(--canvas); border-color:var(--lim-bd); min-height:var(--control-h); padding:0 var(--s-lg); }
+.danger-button:hover { background:var(--lim-ink); border-color:var(--lim-ink); }
+.danger-button:disabled { background:var(--canvas-soft); color:var(--text-faint); border-color:var(--canvas-soft); }
 .primary-button:disabled { background:var(--canvas-soft); color:var(--text-faint); border-color:var(--canvas-soft); }
 button { transition:background-color .15s,color .15s,border-color .15s,box-shadow .15s; }
 /* Icon-only buttons (close, zoom, page) are square and centred. Marked with a class because CSS

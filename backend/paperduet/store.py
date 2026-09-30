@@ -1,4 +1,5 @@
 import json
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,8 +30,10 @@ class Store:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_5.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             if version < 6:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_6.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            # The sample paper is optional: it is not published with the source.
-            if fixture.is_file() and not db.execute("SELECT 1 FROM documents WHERE id='rex-omni'").fetchone():
+            # The sample paper is optional: it is not published with the source,
+            # and a user who deleted it does not get it back on the next start.
+            if fixture.is_file() and not db.execute("SELECT 1 FROM documents WHERE id='rex-omni'").fetchone() \
+                    and not db.execute("SELECT 1 FROM app_settings WHERE key='sample_removed'").fetchone():
                 doc = adapt_fixture(fixture)
                 db.execute("INSERT INTO documents(id,title,title_ko,arxiv_id,status) VALUES(?,?,?,?,?)",
                            (doc.id, doc.title, doc.title_ko, doc.arxiv_id, doc.status))
@@ -104,6 +107,20 @@ class Store:
             return [dict(r) for r in db.execute("""SELECT d.id,d.title,d.status,d.page_count,d.created_at,d.opened_at,
                 (SELECT COUNT(*) FROM blocks b WHERE b.doc_id=d.id) AS block_count
                 FROM documents d ORDER BY COALESCE(opened_at,created_at) DESC,id""")]
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Blocks, sources, glossary, job, usage, conversations, notes and
+        presentation notes all cascade from the document row; files go after."""
+        with self.connect() as db:
+            if not db.execute("DELETE FROM documents WHERE id=?", (doc_id,)).rowcount:
+                return False
+            if doc_id == 'rex-omni':
+                db.execute("INSERT INTO app_settings VALUES('sample_removed','true') ON CONFLICT(key) DO UPDATE SET payload=excluded.payload")
+        directory = self.data_dir / 'documents' / doc_id
+        if directory.parent == self.data_dir / 'documents' and doc_id not in {'', '.', '..'}:
+            # A PDF page still open elsewhere may hold a file; leftovers are harmless.
+            shutil.rmtree(directory, ignore_errors=True)
+        return True
 
     def job(self, doc_id: str):
         with self.connect() as db:

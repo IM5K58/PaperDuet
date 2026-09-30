@@ -100,6 +100,13 @@ class Pipeline:
             return
         self.tasks[doc_id]=asyncio.create_task(self.run(doc_id))
 
+    async def discard(self,doc_id):
+        """Stop a paper's processing before it is deleted so nothing writes it back."""
+        task=self.tasks.pop(doc_id,None)
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task,return_exceptions=True)
+
     async def recover(self):
         with self.store.connect() as db:
             # Upgrade untouched extraction previews only. Translations, notes and

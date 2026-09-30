@@ -137,6 +137,32 @@ def test_real_visualad_html_if_available():
     assert any(r'\(F_{1}\)' in c.text_en for b in blocks if b.table for row in b.table.body for c in row)
 
 
+def test_delete_document_removes_everything_and_a_deleted_sample_stays_gone(api,tmp_path):
+    client,store,_=api
+    events(client.post('/ask',json=body()))
+    assert client.post('/documents/m2-paper/presentation',json={'title':'메모','body_md':'x'}).status_code<300
+    folder=tmp_path/'documents'/'m2-paper';assert folder.exists()
+    assert client.delete('/documents/m2-paper').status_code==204
+    assert client.get('/documents/m2-paper').status_code==404 and not folder.exists()
+    assert 'm2-paper' not in [d['id'] for d in client.get('/documents').json()]
+    with store.connect() as db:
+        for table in ['blocks','source_blocks','glossary','jobs','ai_usage','threads','note_anchors','annotation_sections','presentation_notes']:
+            assert not db.execute(f'SELECT 1 FROM {table} WHERE doc_id=?',('m2-paper',)).fetchone(),table
+        assert not db.execute('SELECT 1 FROM messages').fetchone()
+    assert client.delete('/documents/m2-paper').status_code==404
+    assert client.delete('/documents/rex-omni').status_code==204
+    assert Store(tmp_path,FIXTURE).document('rex-omni') is None  # not re-seeded on the next start
+
+def test_delete_stops_the_papers_running_job(tmp_path):
+    from paperduet.pipeline import Pipeline
+    store,doc_id=seed(tmp_path);pipeline=Pipeline(store,None)
+    async def run():
+        async def forever(_doc_id):await asyncio.Event().wait()
+        pipeline.run=forever;pipeline.start(doc_id);await asyncio.sleep(0)
+        task=pipeline.tasks[doc_id];await pipeline.discard(doc_id)
+        return task.cancelled(),doc_id in pipeline.tasks
+    assert asyncio.run(run())==(True,False)
+
 def test_arxiv_integer_scores_are_body_cells():
     _,blocks,_,_=parse_html('integers',HTML.replace('42.0','42').replace('43.1','43'))
     table=next(b.table for b in blocks if b.table)

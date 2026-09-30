@@ -133,6 +133,12 @@ def create_app(token: str, data_dir: Path, fixture: Path,
         except Exception:
             raise HTTPException(422,'INVALID_PDF') from None
 
+    @app.delete('/documents/{doc_id}',status_code=204)
+    async def delete_document(doc_id: str):
+        await pipeline.discard(doc_id)
+        if not store.delete_document(doc_id):
+            raise HTTPException(404,'Document not found')
+
     @app.get('/documents/{doc_id}/progress')
     async def progress(doc_id: str, request: Request):
         if not store.job(doc_id):
