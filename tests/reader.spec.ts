@@ -394,20 +394,20 @@ test('Tutorial: all ten scenes at 390px, both themes, examples and progress surv
   const scenes=['connect','import','translate','read','original','ask','review','present','export','settings'];
   for(const theme of ['light','dark']){
     while(await page.locator('html').getAttribute('data-theme')!==theme)await page.getByRole('button',{name:'가이드 테마 변경'}).click();
-    for(const id of scenes){await page.getByLabel('장면 선택').selectOption(id);await expect(page.locator('.tutorial-preview')).toBeVisible();expect(await page.evaluate(()=>Math.max(0,document.documentElement.scrollWidth-innerWidth))).toBe(0);}
+    for(const id of scenes){await page.getByLabel('설명 선택').selectOption(id);await expect(page.locator('.tutorial-preview')).toBeVisible();expect(await page.evaluate(()=>Math.max(0,document.documentElement.scrollWidth-innerWidth))).toBe(0);}
   }
-  await page.getByLabel('장면 선택').selectOption('read');await page.getByRole('group',{name:'리더 보기 예시'}).getByRole('button',{name:'번역',exact:true}).click();await expect(page.locator('.tutorial-parallel [lang=en]')).toHaveCount(0);await expect(page.locator('.tutorial-parallel [lang=ko]')).toBeVisible();
-  await page.getByLabel('장면 선택').selectOption('review');for(const name of ['핵심','결과','한계','해석','수식','용어']){await page.getByRole('group',{name:'주석 종류 예시'}).getByRole('button',{name,exact:true}).click();await expect(page.locator('.tutorial-note>div>span')).toHaveText(name);}
-  await page.getByLabel('장면 선택').selectOption('present');await page.getByRole('button',{name:'↑ ↓ 예시 순서 바꾸기'}).click();await expect(page.locator('.tutorial-demo-note-list strong').first()).toHaveText('핵심 방법');
-  await page.getByLabel('장면 선택').selectOption('export');await page.getByLabel('내보내기 형식 예시').selectOption('presentation');await expect(page.locator('.tutorial-export-file b')).toHaveText('presentation.md');await page.getByRole('button',{name:'이 장면 확인했어요',exact:true}).click();
-  await page.screenshot({path:info.outputPath('tutorial-390-dark.png')});await page.reload();await expect(page.getByLabel('장면 선택')).toHaveValue('export');await expect(page.getByRole('button',{name:'✓ 확인 완료',exact:true})).toHaveAttribute('aria-pressed','true');expect(writes).toEqual([]);expect(errors).toEqual([]);
+  await page.getByLabel('설명 선택').selectOption('read');await page.getByRole('group',{name:'리더 보기 예시'}).getByRole('button',{name:'번역',exact:true}).click();await expect(page.locator('.tutorial-parallel [lang=en]')).toHaveCount(0);await expect(page.locator('.tutorial-parallel [lang=ko]')).toBeVisible();
+  await page.getByLabel('설명 선택').selectOption('review');for(const name of ['핵심','결과','한계','해석','수식','용어']){await page.getByRole('group',{name:'주석 종류 예시'}).getByRole('button',{name,exact:true}).click();await expect(page.locator('.tutorial-note>div>span')).toHaveText(name);}
+  await page.getByLabel('설명 선택').selectOption('present');await page.getByRole('button',{name:'↑ ↓ 예시 순서 바꾸기'}).click();await expect(page.locator('.tutorial-demo-note-list strong').first()).toHaveText('핵심 방법');
+  await page.getByLabel('설명 선택').selectOption('export');await page.getByLabel('내보내기 형식 예시').selectOption('presentation');await expect(page.locator('.tutorial-export-file b')).toHaveText('presentation.md');await page.getByRole('button',{name:'이 설명 확인했어요',exact:true}).click();
+  await page.screenshot({path:info.outputPath('tutorial-390-dark.png')});await page.reload();await expect(page.getByLabel('설명 선택')).toHaveValue('export');await expect(page.getByRole('button',{name:'✓ 확인 완료',exact:true})).toHaveAttribute('aria-pressed','true');expect(writes).toEqual([]);expect(errors).toEqual([]);
 });
 
 test('Tutorial: library and reader entry points, browser history, real settings and sample exit',async({page},info)=>{
   await page.setViewportSize({width:1440,height:1000});await page.goto('/?library=1');await page.getByRole('button',{name:'사용 가이드',exact:true}).click();
   await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();await page.screenshot({path:info.outputPath('tutorial-desktop.png')});
-  await page.getByRole('button',{name:'다음 장면 →'}).click();await expect(page).toHaveURL(/tutorial=import/);await page.goBack();await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();
-  await page.getByRole('navigation',{name:'가이드 장면'}).getByRole('button',{name:'10 저장·문제 해결'}).click();await page.getByRole('button',{name:'실제 앱 설정 열기 ↗'}).click();await expect(page.getByRole('dialog',{name:'앱 설정'})).toBeVisible();await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'다음 설명 →'}).click();await expect(page).toHaveURL(/tutorial=import/);await page.goBack();await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();
+  await page.getByRole('navigation',{name:'가이드 설명'}).getByRole('button',{name:'10 저장·문제 해결'}).click();await page.getByRole('button',{name:'실제 앱 설정 열기 ↗'}).click();await expect(page.getByRole('dialog',{name:'앱 설정'})).toBeVisible();await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'샘플로 시작하기 →'}).click();await expect(page.locator('[data-block]')).toHaveCount(285);await page.getByRole('button',{name:'사용 가이드',exact:true}).click();await expect(page.getByRole('heading',{name:'계속 사용할 준비가 됐어요.'})).toBeVisible();
   await page.getByRole('button',{name:'서재로',exact:true}).click();await expect(page.getByRole('heading',{name:'나의 논문 서재'})).toBeVisible();
 });

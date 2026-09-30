@@ -1,6 +1,6 @@
 [package]
 name = "paperduet"
-version = "0.6.0"
+version = "0.7.0"
 description = "PaperDuet bilingual paper reader"
 edition = "2021"
 rust-version = "1.85"

@@ -9,7 +9,7 @@
 .tutorial-header-label { border-left:1px solid var(--hairline); padding-left:var(--s-md); font-size:var(--t-caption); color:var(--text-muted); margin-left:var(--s-xs); }
 .tutorial-layout { display:grid; grid-template-columns:248px minmax(0,1fr); gap:var(--s-xxl); max-width:1340px; margin:auto; padding:var(--s-xxl) var(--s-lg) var(--s-section); }
 .tutorial-sidebar { position:sticky; top:calc(var(--s-section) + var(--s-lg)); align-self:start; max-height:calc(100dvh - var(--s-section) - var(--s-xxl)); overflow-y:auto; scrollbar-width:thin; padding:0 var(--s-md) var(--s-sm) 0; }
-.tutorial-sidebar h1 { font-size:var(--t-h3); line-height:var(--lh-h3); margin:var(--s-sm) 0; }
+.tutorial-sidebar h1 { font-size:var(--t-h3); line-height:var(--lh-h3); margin:var(--s-sm) 0 var(--s-lg); word-break:keep-all; }
 .tutorial-sidebar>p { font-size:var(--t-body-sm); color:var(--text-muted); margin:0 0 var(--s-lg); }
 .tutorial-completion span { display:flex; justify-content:space-between; color:var(--text-muted); font-size:var(--t-caption); }
 .tutorial-completion b { color:var(--ink); font-variant-numeric:tabular-nums; }

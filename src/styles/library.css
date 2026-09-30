@@ -86,7 +86,8 @@
 .dialog-content label { display:block; color:var(--text-muted); font-size:var(--t-label); line-height:var(--lh-label); font-weight:var(--w-strong); }
 .dialog-content input:not([type=checkbox]):not([type=radio]) { display:block; width:100%; min-width:0; margin:var(--s-xs) 0 var(--s-md); }
 .dialog-content small { color:var(--text-muted); display:block; font-size:var(--t-caption); line-height:var(--lh-caption); }
-.dialog-content hr { border:0; border-top:1px solid var(--hairline-soft); margin:var(--s-lg) 0; }
+.dialog-content button+small { margin-top:var(--s-xs); }
+.dialog-content hr { border:0; border-top:1px solid color-mix(in srgb,var(--ink) 22%,transparent); margin:var(--s-xl) 0 var(--s-lg); }
 .dialog-actions { display:flex; flex-wrap:wrap; gap:var(--s-xs); margin:var(--s-md) 0; }
 .dialog-message { color:var(--ink); min-height:var(--s-lg); }
 .connection-status { color:var(--text-muted); }
@@ -119,6 +120,10 @@
 .error-message { color:var(--ink); background:var(--canvas-soft); padding:var(--s-sm) var(--s-md); border-radius:var(--r-sm); }
 .error-message::before { content:'!'; display:inline-grid; place-items:center; width:var(--s-lg); height:var(--s-lg); margin-right:var(--s-xs); border-radius:var(--r-full); background:var(--primary); color:var(--on-primary); font-weight:var(--w-heading); font-size:var(--t-label); }
 .error-message button { margin-left:var(--s-xs); }
+/* In-app replacement for the browser's native "fill out this field" bubble. */
+.field-error { display:flex; align-items:center; gap:var(--s-xs); margin:calc(-1 * var(--s-xs)) 0 var(--s-md); padding:var(--s-xs) var(--s-sm); border-radius:var(--r-sm); background:var(--canvas-soft); color:var(--ink); font-size:var(--t-caption); line-height:var(--lh-caption); }
+.field-error::before { content:'!'; display:inline-grid; place-items:center; flex-shrink:0; width:var(--s-md); height:var(--s-md); border-radius:var(--r-full); background:var(--primary); color:var(--on-primary); font-weight:var(--w-heading); font-size:10px; }
+.dialog-content input[aria-invalid=true] { box-shadow:inset 0 0 0 1px var(--primary); }
 .document-status { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s-sm); padding:var(--s-sm) var(--s-md); background:var(--canvas-soft); border-radius:var(--r-sm); margin:var(--s-lg) 0; font-size:var(--t-body-sm); }
 .startup { min-height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:var(--s-xl); text-align:center; }
 .startup h1 { font-size:var(--t-h3); line-height:var(--lh-h3); }

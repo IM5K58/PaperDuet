@@ -20,6 +20,7 @@ function since(value?: string) {
   return RELATIVE.format(Math.round(seconds / 86400), 'day');
 }
 
+const LOAD_ERROR='서재를 불러오지 못했습니다. 다시 시도해 주세요.';
 const LABELS: Record<string,string>={fixture:'샘플',queued:'처리 대기',running:'처리 중',awaiting_ai:'AI 연결 필요',ready_to_translate:'번역 준비됨',paused:'일시정지',failed:'처리 실패',review:'검수 필요',complete:'완료'};
 const STAGES: Record<string,string>={Ingest:'파일 확인',Extract:'원문 추출',Structure:'구조 정리',Restore:'표·수식 복원',Glossary:'용어집',Translate:'전문 번역',Annotate:'맥락 주석',Validate:'검증',Render:'리더 완성'};
 export function Workspace() {
@@ -53,11 +54,13 @@ export function Workspace() {
   const firstRun=!items.some(item=>item.status!=='fixture');
   const recent=items.find(item=>item.opened_at&&item.block_count>0);
   const arxiv=<ArxivInput onImported={id=>{setSelected(id);void refresh();}}/>;
-  const tutorialLink=<button className="library-tutorial-link" onClick={()=>navigate('tutorial')}><b>?</b><span><strong>처음이라면, 사용 가이드부터</strong><small>AI 연결부터 번역·질문·발표 준비까지 10개 장면으로 알아보세요.</small></span><Icon name="arrowRight"/></button>;
+  const tutorialLink=<button className="library-tutorial-link" onClick={()=>navigate('tutorial')}><b>?</b><span><strong>처음이라면, 사용 가이드부터</strong><small>AI 연결부터 번역·질문·발표 준비까지 10개 설명으로 알아보세요.</small></span><Icon name="arrowRight"/></button>;
   const openSample=()=>hasSample?navigate('reader','rex-omni'):navigate('library');
-  const refresh=()=>request<LibraryItem[]>('/documents').then(setItems).catch(()=>setError('서재를 불러오지 못했습니다. 다시 시도해 주세요.'));
+  const [loading,setLoading]=useState(true);
+  // Right after launch the sidecar may still be booting, so the first load retries quietly.
+  const refresh=async(retries=0,alive=()=>true)=>{for(let attempt=0;alive();attempt++){try{const list=await request<LibraryItem[]>('/documents');if(alive()){setItems(list);setError(e=>e===LOAD_ERROR?'':e);setLoading(false);}return;}catch{if(attempt>=retries){if(alive()){setError(LOAD_ERROR);setLoading(false);}return;}await new Promise(resolve=>setTimeout(resolve,500));}}};
   useEffect(()=>{const pop=()=>{const p=new URLSearchParams(location.search);setScreen(p.has('tutorial')?'tutorial':p.has('doc')?'reader':'library');setTutorialScene(p.get('tutorial')||lastTutorialScene());setDocId(p.get('doc')||'rex-omni');};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
-  useEffect(()=>{if(screen!=='reader')void refresh();},[screen]);
+  useEffect(()=>{if(screen==='reader')return;let alive=true;void refresh(120,()=>alive);return()=>{alive=false;};},[screen]);
   const upload=async(file?:File)=>{
     if(!file||uploadLock.current)return;
     if(!file.name.toLowerCase().endsWith('.pdf')){setError('PDF 파일을 선택해 주세요.');return;}
@@ -72,10 +75,10 @@ export function Workspace() {
         <div className="appbar-actions"><button onClick={()=>navigate('tutorial')}>사용 가이드</button><button onClick={()=>setSettings(true)}>AI 연결 설정</button><button onClick={()=>setAppSettings(true)}>{updateAvailable?'새 업데이트 · 앱 설정':'앱 설정'}</button>
           <button className="primary-button" disabled={uploading} onClick={()=>input.current?.click()}>{uploading?<span className="spinner" aria-hidden="true"/>:<Icon name="plus"/>}논문 추가</button></div></div></header>
       <input ref={input} type="file" accept=".pdf,application/pdf" aria-label="PDF 파일" hidden onChange={e=>void upload(e.target.files?.[0])}/>
-      <main className="library-main"><div className="eyebrow">Your local library</div><h1>나의 논문 서재</h1>
-      <p className="library-intro">{firstRun?<>한 편의 논문을, 처음부터 끝까지.<br/>AI를 연결하고 한국어 대역 리더를 만드세요.</>:`이 PC에 저장된 논문 ${items.length}편`}</p>
+      <main className="library-main"><h1>나의 논문 서재</h1>
+      <p className="library-intro">{loading&&!items.length?'서재를 불러오는 중…':firstRun?<>한 편의 논문을, 처음부터 끝까지.<br/>AI를 연결하고 한국어 대역 리더를 만드세요.</>:`이 PC에 저장된 논문 ${items.length}편`}</p>
       {!guideSeen&&firstRun&&tutorialLink}
-      {error&&<p className="error-message" role="alert">{error}<button onClick={()=>void refresh()}>다시 불러오기</button></p>}
+      {error&&<p className="error-message" role="alert">{error}<button onClick={()=>void refresh(20)}>다시 불러오기</button></p>}
       {firstRun?<><section className="upload-zone" aria-label="PDF 업로드">
         <div className="upload-icon"><Icon name="upload"/></div><h2>{uploading?<><span className="spinner" aria-hidden="true"/>PDF를 가져오고 있습니다…</>:'PDF를 여기에 놓으세요'}</h2><p>최대 150MB · 원본은 이 PC에 저장됩니다.</p><button className="primary-button" disabled={uploading} onClick={()=>input.current?.click()}>PDF 파일 선택</button><small>AI 연결 전에도 원문을 읽을 수 있습니다. 번역은 예상 사용량을 확인한 후 시작합니다.</small>
       </section>{arxiv}</>:recent&&<section className="continue-card" aria-label="이어 읽기"><div className="continue-cover" aria-hidden="true">{recent.title}</div><div className="continue-body"><span className="continue-label">이어 읽기</span><p className="continue-title">{recent.title}</p><p>{since(recent.opened_at)} 마지막으로 읽음</p></div><button className="primary-button" onClick={()=>navigate('reader',recent.id)}>이어서 읽기<Icon name="arrowRight"/></button></section>}

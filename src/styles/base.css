@@ -12,12 +12,19 @@ button:hover { background:var(--canvas-soft); }
 button:disabled { color:var(--text-faint); background:var(--canvas); border-color:var(--hairline-soft); cursor:default; }
 .primary-button { background:var(--primary); color:var(--on-primary); border-color:var(--primary); min-height:var(--control-h); padding:0 var(--s-lg); }
 .primary-button:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
+/* Outline in the primary color for secondary actions that must still read clearly. */
+.secondary-button { color:var(--primary); border-color:var(--primary); }
+.secondary-button:hover { background:var(--accent-soft); }
+.secondary-button:disabled { color:var(--text-faint); border-color:var(--hairline); background:var(--canvas); }
 .primary-button:disabled { background:var(--canvas-soft); color:var(--text-faint); border-color:var(--canvas-soft); }
 button { transition:background-color .15s,color .15s,border-color .15s,box-shadow .15s; }
 /* Icon-only buttons (close, zoom, page) are square and centred. Marked with a class because CSS
    cannot tell "icon only" from "icon + text" (:only-child ignores text nodes). */
 .icon-button { display:inline-grid; place-items:center; padding:0; min-width:var(--control-h-sm); }
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+
+select { cursor:pointer; }
+select:disabled { cursor:default; }
 
 /* Text fields: filled, borderless; the ink ring appears only on focus. */
 input:where(:not([type=checkbox],[type=radio],[type=range])),select,textarea { color:var(--ink); background:var(--field); border:0; border-radius:var(--r-sm); padding:var(--s-xs) var(--s-md); min-height:var(--control-h); font-size:var(--t-body-sm); }
