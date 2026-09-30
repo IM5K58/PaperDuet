@@ -85,6 +85,9 @@ class PipelineOptions(Model):
     restore_model: str = Field(default="claude-sonnet-5", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.:-]+$")
     annotate_model: str = Field(default="claude-sonnet-5", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.:-]+$")
     min_ratio: float = Field(default=0.25, ge=0.05, le=1, allow_inf_nan=False)
+    # Saving mode: the provider's batch API at half price, answers within 24 h.
+    # Chosen per job; never stored as the default (see Pipeline.approve).
+    batch: bool = False
 
 
 class ReaderSettings(Model):

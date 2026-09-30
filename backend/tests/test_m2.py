@@ -142,7 +142,7 @@ def test_v2_database_migration_preserves_existing_m1_doc_and_position(tmp_path):
     store=Store(tmp_path,FIXTURE)
     assert store.document('old').reading_position.offset==19
     assert store.pipeline_options().translate_model=='custom-model' and store.pipeline_options().annotate_model=='claude-sonnet-5'
-    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==6
+    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==7
 
 
 def test_term_regeneration_relocates_to_first_use_preserving_note_id(tmp_path):

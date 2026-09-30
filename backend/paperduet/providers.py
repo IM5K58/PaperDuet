@@ -56,9 +56,20 @@ ANTHROPIC_EFFORT = re.compile(r'claude-(opus-(4-[5-9]|5)|sonnet-(4-6|5)|fable|my
 OPENAI_REASONING = re.compile(r'(gpt-5|gpt-6|o\d)')
 
 
+def prompt_for(stage):
+    return (Path(__file__).with_name('prompts') / f'{stage}.md').read_text(encoding='utf-8')
+
+
+def decode_answer(answer):
+    answer = answer.strip()
+    if answer.startswith('```'):
+        answer = answer.split('\n',1)[-1].rsplit('```',1)[0].strip()
+    return json.loads(answer)
+
+
 class StructuredAdapter:
     async def json(self, stage, model, payload, image=None):
-        prompt = (Path(__file__).with_name('prompts') / f'{stage}.md').read_text(encoding='utf-8')
+        prompt = prompt_for(stage)
         total = {'tokens_in': 0, 'tokens_out': 0, 'cache_read': 0, 'cache_write': 0, 'requests': 0}
         for attempt in range(2):
             answer = ''
@@ -67,11 +78,8 @@ class StructuredAdapter:
                 answer += event.get('text','')
                 for key, value in event.get('usage',{}).items():
                     total[key] = total.get(key, 0) + value
-            answer = answer.strip()
-            if answer.startswith('```'):
-                answer = answer.split('\n',1)[-1].rsplit('```',1)[0].strip()
             try:
-                return json.loads(answer), total
+                return decode_answer(answer), total
             except (ValueError,TypeError):
                 if attempt:
                     raise ProviderError('AI_INVALID_JSON', usage=total) from None
@@ -200,6 +208,163 @@ class APIProvider(StructuredAdapter):
             yield {'usage':usage}
         except ProviderError: raise
         except Exception: raise ProviderError('AI_NETWORK_ERROR',usage=usage) from None
+
+    # Saving mode: the providers' batch APIs run the same requests at half price,
+    # usually within an hour and at most 24 hours later. A handle is plain JSON so
+    # the pipeline can persist it and pick the batch up again after a restart.
+    supports_batch = True
+    GEMINI_BATCH_BYTES = 18_000_000  # inline batch requests must stay under 20 MB
+    SAFE_ID = re.compile(r'[A-Za-z0-9_./-]{1,200}')
+
+    def safe(self, value):
+        if not isinstance(value, str) or not self.SAFE_ID.fullmatch(value) or '..' in value:
+            raise ProviderError('AI_REQUEST_FAILED')
+        return value
+
+    async def batch_call(self, method, path, **kwargs):
+        key=self.vault.get()
+        if not key: raise ProviderError('AI_CONNECTION_REQUIRED')
+        try:
+            async with self.client() as client:
+                response=await client.request(method,path,headers=self.headers(key),**kwargs)
+        except Exception: raise ProviderError('AI_NETWORK_ERROR') from None
+        self.check(response)
+        return response
+
+    def batch_body(self, stage, model, payload, image):
+        _,body=self.body(model,prompt_for(stage),[{'role':'user','content':json.dumps(payload,ensure_ascii=False)}],image,STAGE_EFFORT.get(stage))
+        body.pop('stream',None)
+        return body
+
+    def chunks(self, items):
+        chunk=[];size=0
+        for key,body in items:
+            n=len(json.dumps(body,ensure_ascii=False).encode())+200
+            if chunk and size+n>self.GEMINI_BATCH_BYTES:
+                yield chunk;chunk=[];size=0
+            chunk.append((key,body));size+=n
+        if chunk: yield chunk
+
+    async def submit_batch(self, requests):
+        """Submit [(key, stage, model, payload, image)]. OpenAI and Gemini take one
+        model per batch, Gemini also caps the size, so one call may start several."""
+        groups={}
+        for key,stage,model,payload,image in requests:
+            groups.setdefault('' if self.id=='anthropic' else model,[]).append((key,self.batch_body(stage,model,payload,image)))
+        handle={'provider':self.id,'jobs':[]}
+        try:
+            for model,items in groups.items():
+                if self.id=='anthropic':
+                    data=(await self.batch_call('POST','/v1/messages/batches',json={'requests':[{'custom_id':k,'params':b} for k,b in items]})).json()
+                    handle['jobs'].append({'id':self.safe(data.get('id')),'keys':[k for k,_ in items]})
+                elif self.id=='openai':
+                    lines=''.join(json.dumps({'custom_id':k,'method':'POST','url':'/v1/responses','body':b},ensure_ascii=False)+'\n' for k,b in items).encode()
+                    upload=(await self.batch_call('POST','/v1/files',data={'purpose':'batch'},files={'file':('paperduet.jsonl',lines,'application/jsonl')})).json()
+                    data=(await self.batch_call('POST','/v1/batches',json={'input_file_id':self.safe(upload.get('id')),'endpoint':'/v1/responses','completion_window':'24h'})).json()
+                    handle['jobs'].append({'id':self.safe(data.get('id')),'file':upload['id'],'keys':[k for k,_ in items]})
+                else:
+                    for chunk in self.chunks(items):
+                        body={'batch':{'display_name':'paperduet','input_config':{'requests':{'requests':[{'request':b,'metadata':{'key':k}} for k,b in chunk]}}}}
+                        data=(await self.batch_call('POST',f'/v1beta/models/{model}:batchGenerateContent',json=body)).json()
+                        handle['jobs'].append({'id':self.safe(data.get('name')),'keys':[k for k,_ in chunk]})
+        except Exception:
+            await self.cancel_batch(handle)  # never leave half a submission running and billing
+            raise
+        return handle
+
+    async def batch_done(self, handle):
+        for job in handle['jobs']:
+            if job.get('ended'): continue
+            if self.id=='anthropic':
+                data=(await self.batch_call('GET',f"/v1/messages/batches/{job['id']}")).json()
+                job['ended']=data.get('processing_status')=='ended'
+            elif self.id=='openai':
+                data=(await self.batch_call('GET',f"/v1/batches/{job['id']}")).json()
+                job['ended']=data.get('status') in {'completed','failed','expired','cancelled'}
+                job.update(output=data.get('output_file_id'),errors=data.get('error_file_id'),failed=data.get('status')=='failed')
+            else:
+                data=(await self.batch_call('GET',f"/v1beta/{job['id']}")).json()
+                state=str((data.get('metadata') or {}).get('state',''))
+                job['ended']=bool(data.get('done')) or state.endswith(('SUCCEEDED','FAILED','CANCELLED','EXPIRED'))
+                job['failed']=state.endswith('FAILED')
+        return all(job.get('ended') for job in handle['jobs'])
+
+    def read_message(self, data):
+        """One finished request, in the provider's non-streaming shape."""
+        if self.id=='anthropic':
+            u=data.get('usage') or {};read,write=u.get('cache_read_input_tokens',0),u.get('cache_creation_input_tokens',0)
+            usage={'tokens_in':u.get('input_tokens',0)+read+write,'tokens_out':u.get('output_tokens',0),'cache_read':read,'cache_write':write}
+            text=''.join(c.get('text','') for c in data.get('content',[]) if c.get('type')=='text')
+            limit=data.get('stop_reason')=='max_tokens'
+        elif self.id=='openai':
+            u=data.get('usage') or {}
+            usage={'tokens_in':u.get('input_tokens',0),'tokens_out':u.get('output_tokens',0),'cache_read':(u.get('input_tokens_details') or {}).get('cached_tokens',0),'cache_write':0}
+            text=''.join(c.get('text','') for item in data.get('output',[]) if item.get('type')=='message' for c in item.get('content',[]) if c.get('type')=='output_text')
+            limit=data.get('status')=='incomplete'
+        else:
+            u=data.get('usageMetadata') or {}
+            usage={'tokens_in':u.get('promptTokenCount',0),'tokens_out':u.get('candidatesTokenCount',0)+u.get('thoughtsTokenCount',0),'cache_read':u.get('cachedContentTokenCount',0),'cache_write':0}
+            candidate=(data.get('candidates') or [{}])[0]
+            text=''.join(p.get('text','') for p in (candidate.get('content') or {}).get('parts',[]) if not p.get('thought'))
+            limit=candidate.get('finishReason') not in (None,'STOP')
+        if limit: return ProviderError('AI_OUTPUT_LIMIT'),usage
+        try: return decode_answer(text),usage
+        except (ValueError,TypeError): return ProviderError('AI_INVALID_JSON'),usage
+
+    @staticmethod
+    def batch_error(error, status=None):
+        text=json.dumps(error or {}).lower()
+        if status in (401,403) or 'authentication' in text or 'permission' in text: return ProviderError('AI_AUTH_FAILED')
+        if status==400 or 'invalid_request' in text or 'invalid_argument' in text: return ProviderError('AI_REQUEST_FAILED')
+        return ProviderError('BATCH_RETRY')  # overloaded or server-side trouble: safe to resubmit
+
+    async def batch_results(self, handle):
+        """{key: (answer or ProviderError, usage)}. A request with no answer
+        (expired, cancelled, server error) comes back as BATCH_RETRY."""
+        results={}
+        for job in handle['jobs']:
+            if self.id=='anthropic':
+                text=(await self.batch_call('GET',f"/v1/messages/batches/{job['id']}/results")).text
+                for line in filter(str.strip,text.splitlines()):
+                    item=json.loads(line);result=item.get('result') or {}
+                    if result.get('type')=='succeeded':results[item.get('custom_id')]=self.read_message(result.get('message') or {})
+                    elif result.get('type')=='errored':results[item.get('custom_id')]=(self.batch_error(result.get('error')),{})
+            elif self.id=='openai':
+                for name in ('output','errors'):
+                    if not job.get(name):continue
+                    text=(await self.batch_call('GET',f"/v1/files/{self.safe(job[name])}/content")).text
+                    for line in filter(str.strip,text.splitlines()):
+                        item=json.loads(line);response=item.get('response') or {}
+                        results[item.get('custom_id')]=self.read_message(response.get('body') or {}) if response.get('status_code')==200 else \
+                            (self.batch_error(item.get('error') or (response.get('body') or {}).get('error'),response.get('status_code')),{})
+            else:
+                data=(await self.batch_call('GET',f"/v1beta/{job['id']}")).json()
+                inlined=(data.get('response') or {}).get('inlinedResponses') or {}
+                items=inlined.get('inlinedResponses',[]) if isinstance(inlined,dict) else inlined
+                for i,item in enumerate(items):
+                    key=(item.get('metadata') or {}).get('key') or (job['keys'][i] if i<len(job['keys']) else None)
+                    results[key]=self.read_message(item['response']) if item.get('response') else (self.batch_error(item.get('error')),{})
+            for key in job['keys']:
+                results.setdefault(key,(ProviderError('AI_REQUEST_FAILED' if job.get('failed') else 'BATCH_RETRY'),{}))
+        return {k:v for k,v in results.items() if k in {key for job in handle['jobs'] for key in job['keys']}}
+
+    async def cancel_batch(self, handle):
+        for job in handle['jobs']:
+            if job.get('ended'):continue
+            path={'anthropic':f"/v1/messages/batches/{job['id']}/cancel",'openai':f"/v1/batches/{job['id']}/cancel"}.get(self.id,f"/v1beta/{job['id']}:cancel")
+            try:await self.batch_call('POST',path)
+            except ProviderError:pass  # already finished or gone
+
+    async def forget_batch(self, handle):
+        """Delete finished batches and their files from the provider once the
+        answers are stored locally; the paper's text has no reason to stay there."""
+        for job in handle['jobs']:
+            ids=[job['id']] if self.id!='openai' else [job[n] for n in ('file','output','errors') if job.get(n)]
+            for value in ids:
+                try:
+                    path={'anthropic':f'/v1/messages/batches/{self.safe(value)}','openai':f'/v1/files/{self.safe(value)}'}.get(self.id,f'/v1beta/{self.safe(value)}')
+                    await self.batch_call('DELETE',path)
+                except ProviderError:pass
 
 
 class ProviderRegistry:

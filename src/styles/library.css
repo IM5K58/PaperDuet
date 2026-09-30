@@ -58,7 +58,7 @@
 .state-badge:has(.spinner)::before { display:none; }
 .state-badge .spinner { width:10px; height:10px; border-width:1.5px; margin:0; }
 .state-complete::before,.state-fixture::before { background:var(--res-bd); }
-.state-running::before,.state-queued::before { background:var(--primary); box-shadow:0 0 0 3px var(--accent-soft); }
+.state-running::before,.state-queued::before,.state-batch_waiting::before { background:var(--primary); box-shadow:0 0 0 3px var(--accent-soft); }
 .state-review::before,.state-paused::before,.state-awaiting_ai::before,.state-ready_to_translate::before { background:var(--key-bd); }
 .state-failed::before { background:var(--lim-bd); }
 .paper-actions { display:flex; justify-content:flex-end; gap:var(--s-xxs); }
@@ -118,6 +118,17 @@
 .pipeline-notice button { display:block; margin-top:var(--s-sm); }
 .token-estimate p { margin:var(--s-xs) 0; }
 .transfer-note { color:var(--text-muted); font-size:var(--t-caption); }
+.pipeline-notice p { margin:var(--s-xs) 0 0; }
+.pipeline-notice small { display:block; margin-top:var(--s-xs); }
+/* Immediate vs saving mode, chosen per paper before translation starts. */
+.run-mode { border:0; padding:0; margin:var(--s-md) 0; display:grid; gap:var(--s-xs); }
+.run-mode legend { padding:0; margin-bottom:var(--s-xs); color:var(--text-muted); font-size:var(--t-label); font-weight:var(--w-strong); }
+.run-mode label { display:flex; align-items:flex-start; gap:var(--s-sm); padding:var(--s-sm) var(--s-md); border:1px solid var(--hairline); border-radius:var(--r-sm); cursor:pointer; color:var(--ink); font-weight:var(--w-text); }
+.run-mode label:has(input:checked) { border-color:var(--primary); background:var(--accent-soft); }
+.run-mode label:has(input:disabled) { cursor:default; color:var(--text-faint); }
+.run-mode input { margin:3px 0 0; accent-color:var(--primary); }
+.run-mode span { display:grid; gap:2px; }
+.run-mode label small { color:var(--text-muted); }
 /* No error colour exists in the palette: problems are ink on the soft surface, marked with "!". */
 .error-message { color:var(--ink); background:var(--canvas-soft); padding:var(--s-sm) var(--s-md); border-radius:var(--r-sm); }
 .error-message::before { content:'!'; display:inline-grid; place-items:center; width:var(--s-lg); height:var(--s-lg); margin-right:var(--s-xs); border-radius:var(--r-full); background:var(--primary); color:var(--on-primary); font-weight:var(--w-heading); font-size:var(--t-label); }

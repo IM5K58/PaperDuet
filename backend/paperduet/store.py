@@ -16,7 +16,7 @@ class Store:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 6:
+            if version > 7:
                 raise RuntimeError("Database version is newer than this app")
             if version == 0:
                 db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
@@ -30,6 +30,8 @@ class Store:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_5.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             if version < 6:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_6.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
+            if version < 7:
+                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_7.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             # The sample paper is optional: it is not published with the source,
             # and a user who deleted it does not get it back on the next start.
             if fixture.is_file() and not db.execute("SELECT 1 FROM documents WHERE id='rex-omni'").fetchone() \
@@ -122,6 +124,19 @@ class Store:
             shutil.rmtree(directory, ignore_errors=True)
         return True
 
+    def ai_result(self, doc_id: str, key: str):
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM ai_results WHERE doc_id=? AND key=?", (doc_id, key)).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def save_ai_result(self, doc_id: str, key: str, value):
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO ai_results VALUES(?,?,?)", (doc_id, key, json.dumps(value, ensure_ascii=False)))
+
+    def clear_ai_results(self, doc_id: str):
+        with self.connect() as db:
+            db.execute("DELETE FROM ai_results WHERE doc_id=?", (doc_id,))
+
     def job(self, doc_id: str):
         with self.connect() as db:
             row = db.execute("SELECT * FROM jobs WHERE doc_id=? ORDER BY rowid DESC LIMIT 1", (doc_id,)).fetchone()
@@ -129,7 +144,7 @@ class Store:
                 return None
             result = dict(row)
             result["checkpoint"] = json.loads(row["checkpoint"] or "{}")
-            result["usage"] = [dict(r) for r in db.execute("SELECT stage,model,SUM(tokens_in) AS tokens_in,SUM(tokens_out) AS tokens_out,SUM(cache_read) AS cache_read,SUM(cache_write) AS cache_write,SUM(requests) AS requests,COUNT(*) AS calls FROM ai_usage WHERE doc_id=? GROUP BY stage,model", (doc_id,))]
+            result["usage"] = [dict(r) for r in db.execute("SELECT stage,model,SUM(tokens_in) AS tokens_in,SUM(tokens_out) AS tokens_out,SUM(cache_read) AS cache_read,SUM(cache_write) AS cache_write,SUM(requests) AS requests,COUNT(*) AS calls,batch FROM ai_usage WHERE doc_id=? GROUP BY stage,model,batch", (doc_id,))]
             return result
 
     def update_job(self, doc_id: str, stage: str, status: str, progress: float, **checkpoint):

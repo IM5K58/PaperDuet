@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 interface Connection { port: number; token: string; generation: number }
 export const ERROR_TEXT: Record<string,string> = {
-  ARXIV_INVALID:'올바른 arXiv ID 또는 HTTPS 링크를 입력해 주세요.',ARXIV_DOWNLOAD_FAILED:'arXiv 원문을 가져오지 못했습니다. ID·네트워크를 확인하고 다시 시도해 주세요.',ARXIV_TOO_LARGE:'arXiv 파일이 허용 크기를 초과했습니다.',STORAGE_BUSY:'번역·질문을 마친 뒤 저장 위치를 변경해 주세요.',STORAGE_MAINTENANCE:'저장 위치를 전환 중입니다. 잠시 기다려 주세요.',EXPORT_NOT_BUILT:'내보내기 리더가 빌드되지 않았습니다.',
+  ARXIV_INVALID:'올바른 arXiv ID 또는 HTTPS 링크를 입력해 주세요.',ARXIV_DOWNLOAD_FAILED:'arXiv 원문을 가져오지 못했습니다. ID·네트워크를 확인하고 다시 시도해 주세요.',ARXIV_TOO_LARGE:'arXiv 파일이 허용 크기를 초과했습니다.',STORAGE_BUSY:'번역·질문을 마친 뒤 저장 위치를 변경해 주세요.',STORAGE_MAINTENANCE:'저장 위치를 전환 중입니다. 잠시 기다려 주세요.',EXPORT_NOT_BUILT:'내보내기 리더가 빌드되지 않았습니다.',BATCH_EXPIRED:'제공자가 24시간 안에 처리하지 못한 요청이 있습니다. 이어서 실행하거나 바로 처리로 마저 진행해 주세요.',BATCH_UNSUPPORTED:'절약 모드는 API 키로 연결했을 때만 쓸 수 있습니다.',NOT_IN_SAVING_MODE:'이미 바로 처리로 진행 중입니다.',
 
   AI_CONNECTION_REQUIRED: 'AI 연결 설정에서 API 키 또는 공식 CLI를 연결해 주세요.', AI_AUTH_FAILED: 'API 키를 확인해 주세요.',
   CLI_NOT_FOUND:'공식 CLI를 찾지 못했습니다. 설치하거나 실행 파일 경로를 지정해 주세요.', CLI_DISABLED:'이 빌드에서는 CLI 연결을 지원하지 않습니다.', CLI_UNSUPPORTED:'이 제공자는 API 키 연결만 지원합니다.', CLI_UPDATE_REQUIRED:'CLI 안전 실행 옵션이 부족합니다. 공식 CLI를 업데이트해 주세요.', CLI_REQUEST_FAILED:'CLI 요청이 실패했습니다. 공식 CLI에서 로그인 상태와 모델을 확인해 주세요.', CLI_ISOLATION_FAILED:'CLI 격리 프로세스를 만들지 못했습니다.', CLI_TIMEOUT:'CLI 응답 시간이 초과되었습니다.', AI_OUTPUT_LIMIT:'응답 길이 한도에 도달했습니다. 범위를 줄여 다시 질문해 주세요.', AI_STREAM_INTERRUPTED:'응답이 중단되었습니다. 다시 질문하거나 재생성해 주세요.', SELECTION_CHANGED:'선택한 텍스트가 달라졌습니다. 다시 선택해 주세요.', THREAD_BUSY:'이 대화에서 답변을 생성 중입니다.', CONTEXT_TOO_LARGE:'문맥이 너무 큽니다. 논문 전체 포함을 꺼 주세요.', ANSWER_TOO_LONG:'주석 길이 한도를 초과했습니다. 짧은 답변으로 다시 요청해 주세요.',

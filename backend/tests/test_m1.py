@@ -238,7 +238,7 @@ def test_migration_from_m0_preserves_fixture_and_reader_settings(tmp_path):
     store=Store(tmp_path,FIXTURE)
     assert store.settings().theme=='dark' and store.settings().font_size==19
     assert len(store.document('rex-omni').blocks)==285
-    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==6
+    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==7
 
 
 def test_multimodal_request_and_upstream_error_are_secret_safe(tmp_path):

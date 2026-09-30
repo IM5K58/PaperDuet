@@ -14,7 +14,7 @@ from pydantic import Field, SecretStr
 
 from .models import Model, Note, PipelineOptions, ReaderSettings, ReadingPosition
 from .store import Store
-from .pipeline import Pipeline
+from .pipeline import BUSY, Pipeline
 from .provider import AnthropicProvider, ProviderError, WindowsVault
 from .adapter import inline
 from .validation import validate_block
@@ -153,7 +153,7 @@ def create_app(token: str, data_dir: Path, fixture: Path,
                     previous=value
                 else:
                     yield ': keepalive\n\n'
-                if job['status'] not in {'queued','running'}:
+                if job['status'] not in BUSY:
                     break
                 await asyncio.sleep(.4)
         return StreamingResponse(events(),media_type='text/event-stream')
@@ -182,8 +182,15 @@ def create_app(token: str, data_dir: Path, fixture: Path,
     def pause(doc_id: str):
         job=store.job(doc_id)
         if not job: raise HTTPException(404,'Job not found')
-        if job['status'] in {'running','queued','awaiting_ai','ready_to_translate'}:
+        if job['status'] in BUSY|{'awaiting_ai','ready_to_translate'}:
             store.update_job(doc_id,job['stage'],'paused',job['progress'])
+
+    @app.post('/documents/{doc_id}/realtime', status_code=204)
+    def realtime(doc_id: str):
+        try:
+            pipeline.switch_to_realtime(doc_id)
+        except ValueError:
+            raise HTTPException(409,'NOT_IN_SAVING_MODE') from None
 
     @app.post('/documents/{doc_id}/blocks/{block_id}/regenerate')
     async def regenerate(doc_id: str,block_id: str):
@@ -195,7 +202,7 @@ def create_app(token: str, data_dir: Path, fixture: Path,
     @app.patch('/documents/{doc_id}/blocks/{block_id}')
     def edit_block(doc_id: str,block_id: str,value: BlockEdit):
         job=store.job(doc_id)
-        if not job or job['status'] in {'running','queued'}:
+        if not job or job['status'] in BUSY:
             raise HTTPException(409,'JOB_BUSY')
         doc=store.document(doc_id)
         block=next((b for b in doc.blocks if b.id==block_id),None)
@@ -313,7 +320,7 @@ def create_app(token: str, data_dir: Path, fixture: Path,
     def save_answer(tid: str,value: NoteInput):
         try:
             thread=ask.thread(tid);job=store.job(thread['doc_id'])
-            if job and job['status'] in {'running','queued'}:raise HTTPException(409,'JOB_BUSY')
+            if job and job['status'] in BUSY:raise HTTPException(409,'JOB_BUSY')
             block=ask.save_note(tid,value.message_id,value.kind)
             if job:pipeline.refresh_review(thread['doc_id'])
             return block

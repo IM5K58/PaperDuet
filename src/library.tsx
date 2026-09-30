@@ -21,7 +21,7 @@ function since(value?: string) {
 }
 
 const LOAD_ERROR='서재를 불러오지 못했습니다. 다시 시도해 주세요.';
-const LABELS: Record<string,string>={fixture:'샘플',queued:'처리 대기',running:'처리 중',awaiting_ai:'AI 연결 필요',ready_to_translate:'번역 준비됨',paused:'일시정지',failed:'처리 실패',review:'검수 필요',complete:'완료'};
+const LABELS: Record<string,string>={fixture:'샘플',queued:'처리 대기',running:'처리 중',batch_waiting:'제공자 대기 중',awaiting_ai:'AI 연결 필요',ready_to_translate:'번역 준비됨',paused:'일시정지',failed:'처리 실패',review:'검수 필요',complete:'완료'};
 const STAGES: Record<string,string>={Ingest:'파일 확인',Extract:'원문 추출',Structure:'구조 정리',Restore:'표·수식 복원',Glossary:'용어집',Translate:'전문 번역',Annotate:'맥락 주석',Validate:'검증',Render:'리더 완성'};
 export function Workspace() {
   const initial=new URLSearchParams(location.search);
@@ -98,7 +98,7 @@ export function Workspace() {
 }
 
 type Tracked={id:string;title:string;status:string;stage:string;progress:number};
-const ACTIVE=new Set(['queued','running']);
+const ACTIVE=new Set(['queued','running','batch_waiting']);
 const DONE_TEXT:Record<string,string>={complete:'번역·주석 완료',review:'완료 · 검수할 부분이 있습니다',paused:'일시정지됨',failed:'처리 중단',awaiting_ai:'원문 추출 완료 · AI 연결 후 번역할 수 있습니다',ready_to_translate:'원문 추출 완료 · 번역을 시작할 수 있습니다'};
 const OK_STATES=new Set(['complete','review','ready_to_translate','awaiting_ai']);
 // Polls the local library so running jobs stay visible after their dialog closes.
@@ -125,7 +125,7 @@ function JobBanner({active,settled,hidden,onOpen,onRead,onDismiss}:{active:Track
   const running=active.filter(t=>t.id!==hidden);const finished=settled.filter(t=>t.id!==hidden);
   if(!running.length&&!finished.length)return null;
   return <div className="job-banner" role="status" aria-live="polite">
-    {running.map(t=><div key={t.id} className="job-toast"><span className="spinner" aria-hidden="true"/><div className="job-toast-body"><b title={t.title}>{t.title}</b><span>{t.status==='queued'?'처리 대기':STAGES[t.stage]??t.stage} · {Math.round(t.progress*100)}%</span><progress aria-label={`${t.title} 처리 진행률`} max={1} value={t.progress}/></div><button onClick={()=>onOpen(t.id)}>자세히</button></div>)}
+    {running.map(t=><div key={t.id} className="job-toast"><span className="spinner" aria-hidden="true"/><div className="job-toast-body"><b title={t.title}>{t.title}</b><span>{t.status==='queued'?'처리 대기':t.status==='batch_waiting'?'절약 모드 · 제공자 서버에서 처리 중':STAGES[t.stage]??t.stage} · {Math.round(t.progress*100)}%</span><progress aria-label={`${t.title} 처리 진행률`} max={1} value={t.progress}/></div><button onClick={()=>onOpen(t.id)}>자세히</button></div>)}
     {finished.map(t=><div key={t.id} className={`job-toast job-${t.status}`}><span className="job-icon" aria-hidden="true">{OK_STATES.has(t.status)?'✓':'!'}</span><div className="job-toast-body"><b title={t.title}>{t.title}</b><span>{DONE_TEXT[t.status]??LABELS[t.status]??t.status}</span></div>{t.status==='complete'||t.status==='review'?<button className="primary-button" onClick={()=>{onDismiss(t.id);onRead(t.id);}}>읽기</button>:<button onClick={()=>{onDismiss(t.id);onOpen(t.id);}}>{t.status==='ready_to_translate'||t.status==='awaiting_ai'?'번역 시작하기':'상태 보기'}</button>}<button className="job-close" aria-label="알림 닫기" onClick={()=>onDismiss(t.id)}><Icon name="close"/></button></div>)}
   </div>;
 }
@@ -146,7 +146,12 @@ function DeleteDialog({item,running,onClose,onDeleted}:{item:LibraryItem;running
 const USAGE_STAGES:Record<string,string>={table:'표 복원',equation:'수식 복원',glossary:'용어집',translate:'전문 번역',annotate:'맥락 주석'};
 function UsageSummary({usage}:{usage:Job['usage']}){
   const total=usage.reduce((sum,u)=>sum+u.tokens_in+u.tokens_out,0);const calls=usage.reduce((sum,u)=>sum+(u.calls??0),0);const cached=usage.reduce((sum,u)=>sum+(u.cache_read??0)+(u.cache_write??0),0);
-  return <details className="usage-summary"><summary>실제 AI 사용량 · 합계 {total.toLocaleString()} 토큰{calls?` · ${calls}회 호출`:''}</summary><table><thead><tr><th>단계 · 모델</th><th>호출</th><th>입력</th><th>출력</th></tr></thead><tbody>{usage.map(u=><tr key={u.stage+u.model}><td>{USAGE_STAGES[u.stage]??u.stage}<small>{u.model}</small></td><td>{u.calls??'–'}{u.requests&&u.calls&&u.requests>u.calls?<small>재시도 {u.requests-u.calls}</small>:null}</td><td>{u.tokens_in.toLocaleString()}{(u.cache_read||u.cache_write)?<small>캐시 {((u.cache_read??0)+(u.cache_write??0)).toLocaleString()}</small>:null}</td><td>{u.tokens_out.toLocaleString()}</td></tr>)}</tbody></table>{cached>0&&<small>입력에는 캐시로 재사용한 토큰(공식 CLI의 기본 지시문 등) {cached.toLocaleString()}개가 포함됩니다.</small>}</details>;
+  return <details className="usage-summary"><summary>실제 AI 사용량 · 합계 {total.toLocaleString()} 토큰{calls?` · ${calls}회 호출`:''}</summary><table><thead><tr><th>단계 · 모델</th><th>호출</th><th>입력</th><th>출력</th></tr></thead><tbody>{usage.map(u=><tr key={u.stage+u.model+(u.batch??0)}><td>{USAGE_STAGES[u.stage]??u.stage}<small>{u.model}{u.batch?' · 절약 모드(50% 할인)':''}</small></td><td>{u.calls??'–'}{u.requests&&u.calls&&u.requests>u.calls?<small>재시도 {u.requests-u.calls}</small>:null}</td><td>{u.tokens_in.toLocaleString()}{(u.cache_read||u.cache_write)?<small>캐시 {((u.cache_read??0)+(u.cache_write??0)).toLocaleString()}</small>:null}</td><td>{u.tokens_out.toLocaleString()}</td></tr>)}</tbody></table>{cached>0&&<small>입력에는 캐시로 재사용한 토큰(공식 CLI의 기본 지시문 등) {cached.toLocaleString()}개가 포함됩니다.</small>}</details>;
+}
+
+function submittedAgo(seconds:number){
+  const minutes=Math.round((Date.now()/1000-seconds)/60);
+  return minutes<1?'방금':minutes<60?`${minutes}분 전`:`${Math.floor(minutes/60)}시간 ${minutes%60}분 전`;
 }
 
 function ProgressPanel({docId,onClose,onRead,onSettings}:{docId:string;onClose:()=>void;onRead:()=>void;onSettings:()=>void}) {
@@ -166,16 +171,23 @@ function ProgressPanel({docId,onClose,onRead,onSettings}:{docId:string;onClose:(
     void stream();return()=>{controller.abort();clearTimeout(retry);};
   },[docId,revision]);
   useEffect(()=>{if(job&&job.status!=='running'&&job.status!=='queued')void request<typeof estimate>(`/documents/${docId}/estimate`).then(setEstimate).catch(()=>{});},[docId,job?.status]);
-  const active=job?.status==='running'||job?.status==='queued';
+  const active=job?.status==='running'||job?.status==='queued'||job?.status==='batch_waiting';
+  const saving=job?.checkpoint.options?.batch;const waiting=job?.status==='batch_waiting'?job.checkpoint.pending_batch:null;
+  const cli=options.mode==='cli';
   const action=async(path:string,body?:PipelineOptions)=>{setBusy(true);setError('');try{await request(`/documents/${docId}/${path}`,{method:'POST',body:body?JSON.stringify(body):undefined});setRevision(v=>v+1);}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
   return <Modal title="논문 처리" onClose={onClose}><div className="dialog-content"><p className="pipeline-state">{(active||!job)&&<span className="spinner" aria-hidden="true"/>}{job?LABELS[job.status]:'상태 확인 중…'}</p><progress aria-label="논문 처리 진행률" max={1} value={job?.progress??0}/><p>{job?`${STAGES[job.stage]??job.stage} · ${Math.round(job.progress*100)}%`:''}</p>
     <ol className="pipeline-stages">{Object.entries(STAGES).map(([stage,label])=><li key={stage} className={job?.stage===stage?'current':job?.checkpoint.completed_stages?.includes(stage)?'done':''}><span>{job?.checkpoint.completed_stages?.includes(stage)?'✓':'○'}</span>{label}</li>)}</ol>
     {job?.checkpoint.extracted_pages!==undefined&&<p>추출한 페이지 {job.checkpoint.extracted_pages}쪽{job.checkpoint.total_blocks?` · 번역 ${job.checkpoint.translated_count??0}/${job.checkpoint.total_blocks}블록`:''}</p>}
     {job?.checkpoint.annotation_total!==undefined&&<p>주석 완료 {job.checkpoint.annotation_count??0}/{job.checkpoint.annotation_total}개 섹션 묶음</p>}
+    {waiting&&<div className="pipeline-notice"><b>절약 모드 · 제공자 서버에서 처리 중</b><p>{STAGES[job!.stage]??job!.stage} 요청 {waiting.count}건을 {submittedAgo(waiting.submitted_at)} 제출했습니다. 보통 1시간 이내, 늦으면 최대 24시간 걸립니다. 앱을 꺼도 제공자 서버에서 계속 처리되고, 다시 켜면 결과를 가져와 이어서 진행합니다.</p><button disabled={busy} onClick={()=>void action('realtime')}>남은 부분 바로 처리</button><small>제출한 요청을 취소하고 남은 부분을 기본 요금으로 바로 처리합니다. 이미 끝난 결과는 그대로 씁니다.</small></div>}
+    {active&&saving&&!waiting&&<p className="transfer-note">절약 모드로 처리 중입니다. 다음 단계 요청을 제공자에게 보내고 있습니다.</p>}
     {job?.status==='awaiting_ai'&&<div className="pipeline-notice">텍스트 추출이 끝났습니다. 아직 완성된 대역 리더가 아닙니다. AI를 연결해 표·수식 복원, 번역과 주석을 만들어 주세요.<button onClick={onSettings}>AI 연결 설정</button></div>}
-    {estimate&&!active&&<><div className="token-estimate"><b>예상 사용량</b><p>입력 약 {estimate.input_tokens.toLocaleString()} · 출력 약 {estimate.output_tokens.toLocaleString()} 토큰</p><small>문자 수와 이미지 수를 바탕으로 한 추정치입니다. 재시도·표 복원에 따라 실제 사용량이 달라집니다.</small></div><ModelChoices options={options} setOptions={setOptions}/><p className="transfer-note">번역·주석 시작 시 본문과 표·수식 이미지가 선택한 제공자·모델로 전송됩니다. API 요금 또는 공식 CLI의 사용량 한도가 적용됩니다.</p></>}
+    {estimate&&!active&&<><div className="token-estimate"><b>예상 사용량</b><p>입력 약 {estimate.input_tokens.toLocaleString()} · 출력 약 {estimate.output_tokens.toLocaleString()} 토큰</p><small>문자 수와 이미지 수를 바탕으로 한 추정치입니다. 재시도·표 복원에 따라 실제 사용량이 달라집니다.</small></div><ModelChoices options={options} setOptions={setOptions}/><fieldset className="run-mode"><legend>처리 방식</legend>
+      <label><input type="radio" name="run-mode" checked={!options.batch||cli} onChange={()=>setOptions({...options,batch:false})}/><span><b>바로 처리</b><small>몇 분 안에 끝납니다 · 기본 요금</small></span></label>
+      <label><input type="radio" name="run-mode" checked={!!options.batch&&!cli} disabled={cli} onChange={()=>setOptions({...options,batch:true})}/><span><b>절약 모드</b><small>토큰 요금 50% 할인 · 보통 1시간 이내, 최대 24시간</small></span></label>
+      {cli&&<small>절약 모드는 API 키로 연결했을 때만 쓸 수 있습니다.</small>}</fieldset><p className="transfer-note">번역·주석 시작 시 본문과 표·수식 이미지가 선택한 제공자·모델로 전송됩니다. API 요금 또는 공식 CLI의 사용량 한도가 적용됩니다.</p></>}
     {job?.checkpoint.error&&<p role="alert" className="error-message">{ERROR_TEXT[job.checkpoint.error]??'처리가 중단되었습니다. 다시 시도해 주세요.'}</p>}{error&&<p role="alert" className="error-message">{error}</p>}
     {!!job?.usage.length&&<UsageSummary usage={job.usage}/>}
-    <div className="dialog-actions"><button disabled={!job?.checkpoint.completed_stages?.includes('Structure')} onClick={onRead}>원문·대역 읽기</button>{active?<button disabled={busy} onClick={()=>void action('pause')}>일시정지</button>:job&& (!['complete','review'].includes(job.status)||!job.checkpoint.completed_stages?.includes('Annotate'))&&<button className="primary-button" disabled={busy} onClick={()=>void action('resume',options)}>{['complete','review'].includes(job.status)?'주석 이어서 만들기':job.status==='paused'||job.status==='failed'?'이어서 실행':'번역·주석 시작'}</button>}</div><small>창을 닫아도 처리는 백그라운드에서 계속되고, 화면 위쪽에 진행률이 표시됩니다. 앱을 종료하면 저장된 단계부터 다음 실행 때 재개합니다.</small>
+    <div className="dialog-actions"><button disabled={!job?.checkpoint.completed_stages?.includes('Structure')} onClick={onRead}>원문·대역 읽기</button>{active?<button disabled={busy} title={waiting?'제출한 요청을 취소합니다. 이미 끝난 결과는 보관됩니다.':undefined} onClick={()=>void action('pause')}>일시정지</button>:job&& (!['complete','review'].includes(job.status)||!job.checkpoint.completed_stages?.includes('Annotate'))&&<button className="primary-button" disabled={busy} onClick={()=>void action('resume',{...options,batch:!!options.batch&&!cli})}>{['complete','review'].includes(job.status)?'주석 이어서 만들기':job.status==='paused'||job.status==='failed'?'이어서 실행':'번역·주석 시작'}</button>}</div><small>창을 닫아도 처리는 백그라운드에서 계속되고, 화면 위쪽에 진행률이 표시됩니다. 앱을 종료하면 저장된 단계부터 다음 실행 때 재개합니다.</small>
   </div></Modal>;
 }
