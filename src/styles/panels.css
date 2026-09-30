@@ -107,3 +107,27 @@
   .connection-choices { gap:var(--s-xs); }
 }
 @media(max-width:600px) { .document-actions { gap:var(--s-xs); } }
+
+/* 질문 규칙·프리셋 editor */
+.ask-settings textarea { display:block; width:100%; min-width:0; margin:var(--s-xs) 0 var(--s-md); resize:vertical; color:var(--ink); font-weight:var(--w-text); font-size:var(--t-body-sm); line-height:var(--lh-body-sm); }
+.ask-settings section + section { border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent); margin-top:var(--s-lg); }
+.ask-settings section:first-child h3 { margin-top:0; }
+.ask-settings h3 span { margin-left:var(--s-xxs); color:var(--text-muted); font-size:var(--t-label); font-weight:var(--w-text); }
+.ask-settings-help { margin:0 0 var(--s-md); color:var(--text-muted); }
+.dialog-content.ask-settings .ask-settings-number input:not([type=checkbox]):not([type=radio]) { width:96px; margin:var(--s-xs) 0 var(--s-xxs); }
+.preset-list { list-style:none; padding:0; margin:0 0 var(--s-sm); display:grid; gap:var(--s-sm); }
+.preset-card { border:1px solid var(--hairline); border-radius:var(--r-md); padding:var(--s-md); }
+.preset-card-head { display:flex; align-items:flex-end; gap:var(--s-xs); }
+.preset-card-head label { flex:1; min-width:0; }
+.dialog-content.ask-settings .preset-card-head input:not([type=checkbox]):not([type=radio]) { margin-bottom:0; }
+.preset-card>label { display:block; margin-top:var(--s-sm); }
+.preset-card textarea { margin-bottom:0; }
+.preset-card-head .icon-button { flex-shrink:0; width:var(--control-h); height:var(--control-h); color:var(--text-muted); background:transparent; border-color:transparent; }
+.preset-card-head .icon-button:hover:not(:disabled) { color:var(--lim-bd); background:var(--lim-bg); }
+.preset-card-head .icon-button:disabled { background:transparent; border-color:transparent; }
+.preset-add { display:inline-flex; align-items:center; gap:var(--s-xxs); }
+/* Save stays reachable however many presets there are. */
+.ask-settings-actions { position:sticky; bottom:0; z-index:1; margin:var(--s-lg) calc(-1 * var(--s-lg)) calc(-1 * var(--s-xl)); padding:var(--s-md) var(--s-lg) var(--s-lg); background:var(--canvas); border-top:1px solid var(--hairline-soft); }
+@media(max-width:600px) {
+  .ask-settings-actions { margin:var(--s-lg) calc(-1 * var(--s-md)) calc(-1 * var(--s-lg)); padding:var(--s-md); }
+}

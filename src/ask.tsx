@@ -109,6 +109,23 @@ export function AskPanel({doc,anchor:initialAnchor,threadId:initialThread,preset
 }
 
 function AskSettingsEditor({settings,onClose,onSave}:{settings:AskSettings;onClose:()=>void;onSave:(s:AskSettings)=>Promise<void>}) {
-  const [draft,setDraft]=useState(settings);const [error,setError]=useState('');
-  return <Modal title="질문 규칙·프리셋" onClose={onClose}><div className="dialog-content"><label>시스템 지시<textarea rows={8} value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}/></label><label>앞뒤 문맥 블록 수<input type="number" min={0} max={8} value={draft.neighbors} onChange={e=>setDraft({...draft,neighbors:Number(e.target.value)})}/></label>{draft.presets.map((p,i)=><fieldset key={p.id}><label>액션 이름<input value={p.label} maxLength={40} onChange={e=>setDraft({...draft,presets:draft.presets.map((v,j)=>j===i?{...v,label:e.target.value}:v)})}/></label><label>액션 지시<textarea aria-label="액션 지시" value={p.instruction} maxLength={4000} onChange={e=>setDraft({...draft,presets:draft.presets.map((v,j)=>j===i?{...v,instruction:e.target.value}:v)})}/></label><button disabled={draft.presets.length===1} onClick={()=>setDraft({...draft,presets:draft.presets.filter((_,j)=>j!==i)})}>프리셋 삭제</button></fieldset>)}<button onClick={()=>setDraft({...draft,presets:[...draft.presets,{id:crypto.randomUUID(),label:'나의 질문',instruction:'원하는 답변 방식을 적어 주세요.'}]})}>프리셋 추가</button><button className="primary-button" onClick={()=>void onSave(draft).catch(e=>setError(e.message))}>질문 설정 저장</button>{error&&<p role="alert">{error}</p>}</div></Modal>;
+  const [draft,setDraft]=useState(settings);const [error,setError]=useState('');const [saving,setSaving]=useState(false);
+  const update=(i:number,patch:Partial<Preset>)=>setDraft({...draft,presets:draft.presets.map((v,j)=>j===i?{...v,...patch}:v)});
+  const save=async()=>{setSaving(true);setError('');try{await onSave(draft);}catch(e){setError((e as Error).message);setSaving(false);}};
+  return <Modal title="질문 규칙·프리셋" onClose={onClose}><div className="dialog-content ask-settings">
+    <section aria-labelledby="ask-rules-title"><h3 id="ask-rules-title">기본 규칙</h3><p className="ask-settings-help">모든 질문에 함께 보내는 지시입니다.</p>
+      <label>시스템 지시<textarea aria-label="시스템 지시" rows={8} value={draft.system} onChange={e=>setDraft({...draft,system:e.target.value})}/></label>
+      <label className="ask-settings-number">앞뒤 문맥 블록 수<input type="number" min={0} max={8} value={draft.neighbors} onChange={e=>setDraft({...draft,neighbors:Number(e.target.value)})}/><small>선택한 블록 앞뒤로 함께 보낼 블록 수입니다. 0–8개</small></label>
+    </section>
+    <section aria-labelledby="ask-presets-title"><h3 id="ask-presets-title">빠른 질문 프리셋 <span>{draft.presets.length}개</span></h3><p className="ask-settings-help">질문 패널에 버튼으로 나타납니다. 누르면 액션 지시가 질문과 함께 전달됩니다.</p>
+      <ol className="preset-list">{draft.presets.map((p,i)=><li key={p.id} className="preset-card">
+        <div className="preset-card-head"><label>액션 이름<input value={p.label} maxLength={40} onChange={e=>update(i,{label:e.target.value})}/></label>
+          <button className="icon-button" aria-label={`${p.label||'이름 없는'} 프리셋 삭제`} title="프리셋 삭제" disabled={draft.presets.length===1} onClick={()=>setDraft({...draft,presets:draft.presets.filter((_,j)=>j!==i)})}><Icon name="trash"/></button></div>
+        <label>액션 지시<textarea aria-label="액션 지시" rows={3} value={p.instruction} maxLength={4000} onChange={e=>update(i,{instruction:e.target.value})}/></label>
+      </li>)}</ol>
+      <button className="preset-add" onClick={()=>setDraft({...draft,presets:[...draft.presets,{id:crypto.randomUUID(),label:'나의 질문',instruction:'원하는 답변 방식을 적어 주세요.'}]})}><Icon name="plus"/>프리셋 추가</button>
+    </section>
+    {error&&<p role="alert" className="error-message">{error}</p>}
+    <div className="dialog-actions ask-settings-actions"><button className="primary-button" disabled={saving} onClick={()=>void save()}>질문 설정 저장</button><button disabled={saving} onClick={onClose}>취소</button></div>
+  </div></Modal>;
 }
