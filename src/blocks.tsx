@@ -72,15 +72,18 @@ export const ReaderBlock = memo(function ReaderBlock({ block: b, evidence }: { b
         <span className={cell.text_ko&&cell.text_ko!==cell.text_en?'cell-en':''}><Inline text={cell.text_en} /></span>{cell.text_ko&&cell.text_ko!==cell.text_en&&<span className="cell-ko"><Inline text={cell.text_ko}/></span>}
       </Tag>;
     });
-    return <figure id={b.id} data-block className="table-block">
-      <figcaption><b>{b.n}</b><span className={b.caption_en&&b.caption_ko&&b.caption_en!==b.caption_ko?'caption-en':''}><Inline text={b.caption_en||b.caption_ko}/></span>{b.caption_en&&b.caption_ko&&b.caption_en!==b.caption_ko&&<span className="caption-ko"><Inline text={b.caption_ko}/></span>}{anchor}</figcaption>
-      <div className="table-scroll" role="region" aria-label={`${b.n} 가로 스크롤`} tabIndex={0}>
+    // A grid flagged V4 may have merged or dropped columns: lead with the page image.
+    const suspect = b.qa_flags.includes('V4') && !!b.image_path;
+    const grid = <div className="table-scroll" role="region" aria-label={`${b.n} 가로 스크롤`} tabIndex={0}>
         <table><thead>{b.table.header.map((r, i) => <tr key={i}>{renderCells(r, i, true)}</tr>)}</thead>
           <tbody>{b.table.body.map((r, i) => <tr key={i} className={b.table!.highlight_rows.includes(i) ? 'highlight' : r.every(c => c.is_header) ? 'group-row' : ''}>{renderCells(r, i, false)}</tr>)}</tbody>
         </table>
-      </div>
-      {!!(b.table.highlight_rows.length||b.table.best_cells.length)&&<p className="table-legend">{b.table.highlight_rows.length>0&&<span><i/> 제안 모델</span>}{b.table.best_cells.length>0&&<span><strong>굵은 수치</strong> 열별 최댓값 (동률 포함)</span>}</p>}
-      {b.image_path&&<details className="table-original"><summary>원본 표 이미지 확인</summary><Crop block={b}/></details>}
+      </div>;
+    return <figure id={b.id} data-block className="table-block">
+      <figcaption><b>{b.n}</b><span className={b.caption_en&&b.caption_ko&&b.caption_en!==b.caption_ko?'caption-en':''}><Inline text={b.caption_en||b.caption_ko}/></span>{b.caption_en&&b.caption_ko&&b.caption_en!==b.caption_ko&&<span className="caption-ko"><Inline text={b.caption_ko}/></span>}{anchor}</figcaption>
+      {suspect?<><Crop block={b}/><p className="table-suspect">자동으로 추출한 표의 구조가 원본과 달라 원본 이미지를 먼저 보여 줍니다. 아래 <b>검수 필요</b>에서 <b>원본 이미지로 표 다시 복원</b>을 누르면 AI가 이미지를 보고 표를 다시 만듭니다.</p><details className="table-original"><summary>자동 추출한 표 보기</summary>{grid}</details></>:grid}
+      {!suspect&&!!(b.table.highlight_rows.length||b.table.best_cells.length)&&<p className="table-legend">{b.table.highlight_rows.length>0&&<span><i/> 제안 모델</span>}{b.table.best_cells.length>0&&<span><strong>굵은 수치</strong> 열별 최댓값 (동률 포함)</span>}</p>}
+      {!suspect&&b.image_path&&<details className="table-original"><summary>원본 표 이미지 확인</summary><Crop block={b}/></details>}
     </figure>;
   }
   if (b.type === 'fig') return <figure id={b.id} data-block className="figure-block">

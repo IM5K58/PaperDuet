@@ -347,12 +347,15 @@ class PyMuPDFParser:
                     table=(aligned_numeric_table(page,found,region,lines) or native_table(found)) if found else None
                     if table and (not table.body or (found and fitz.Rect(found.bbox).width<region.width*.9)):
                         table=None
+                    item["en"]=html.escape(page.get_text("text",clip=region,sort=True))
                     if table:
-                        from .validation import table_grid
+                        from .validation import suspicious_table, table_grid
                         try: table_grid(table)
                         except ValueError: table=None
+                        # A merged or partial grid reads worse than the page image;
+                        # leave it to image restoration instead.
+                        if table and suspicious_table(table,item["en"]): table=None
                     item["table"]=table.model_dump(exclude_none=True) if table else None
-                    item["en"]=html.escape(page.get_text("text",clip=region,sort=True))
                     item["needs_restore"]=True
                 excluded.extend([list(region),list(cap)])
                 items.append(item)

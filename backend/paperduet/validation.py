@@ -48,6 +48,19 @@ def numeric_locations(table: Table):
             if r>=len(table.header) and NUMERIC_CELL.fullmatch(plain(value).strip())}
 
 
+def suspicious_table(table: Table, source_text: str = '') -> bool:
+    """A grid can be well-formed and still wrong. PDF table detection sometimes
+    grids only part of a table (e.g. its shaded columns) and pours the rest into
+    one cell, or drops rows. Distrust grids where one cell holds a large share of
+    the numbers, or whose cells hold clearly fewer numbers than the region's text."""
+    counts = [sum(number_tokens(c.text_en).values()) for row in table.header + table.body for c in row]
+    total = sum(counts)
+    if total >= 12 and max(counts) > max(6, total * .25):
+        return True
+    expected = sum(number_tokens(source_text).values()) if source_text else 0
+    return expected >= 12 and total < expected * .8
+
+
 def validate_block(block: Block, source: Block, glossary: list[dict], references=False, ratio=.25):
     flags=[]
     if references:
@@ -60,7 +73,9 @@ def validate_block(block: Block, source: Block, glossary: list[dict], references
     if block.table:
         try:
             table_grid(block.table)
-            if source.table and numeric_locations(block.table)!=numeric_locations(source.table):
+            if suspicious_table(block.table, source.en or ""):
+                flags.append("V4")
+            elif source.table and not suspicious_table(source.table, source.en or "") and numeric_locations(block.table)!=numeric_locations(source.table):
                 flags.append("V4")
         except ValueError:
             flags.append("V4")

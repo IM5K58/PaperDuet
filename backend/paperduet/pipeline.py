@@ -16,7 +16,7 @@ from .adapter import inline, parse_table, plain
 from .models import Model, PipelineOptions
 from .pdf_parser import PyMuPDFParser
 from .provider import ProviderError
-from .validation import number_tokens, numeric_locations, table_grid, validate_block
+from .validation import number_tokens, numeric_locations, suspicious_table, table_grid, validate_block
 from .annotations import AnnotationBatch, first_occurrences, glossary_candidates, make_notes, section_batches, section_window, validate_note
 from .table_style import decorate_tables
 
@@ -128,6 +128,12 @@ def tracked(unit, done):
     done()
 
 
+def trusted_table(source):
+    """The PDF parser's own grid, when it can be believed. A suspicious grid is
+    restored from the page image instead and never used as the reference."""
+    return bool(source.table) and not suspicious_table(source.table,source.en or '')
+
+
 class Pipeline:
     def __init__(self, store, provider, parser=None):
         self.store,self.provider=store,provider
@@ -169,8 +175,25 @@ class Pipeline:
                 checkpoint.update(parser_revision=2,reextract=True,completed_stages=['Ingest'],extracted_pages=0,translated=[],restored=[])
                 db.execute("UPDATE jobs SET status='queued',stage='Extract',progress=0,checkpoint=? WHERE doc_id=?",(json.dumps(checkpoint),row['doc_id']))
             ids=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('queued','running','batch_waiting')")]
+            finished=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('review','complete')")]
+        for doc_id in finished:
+            self.flag_suspicious_tables(doc_id)
         for doc_id in ids:
             self.start(doc_id)
+
+    def flag_suspicious_tables(self,doc_id):
+        """Papers processed before suspicious grids were detected: mark those tables
+        for review (the reader then shows the page image, and regenerating restores
+        the table from it). Idempotent."""
+        doc=self.store.document(doc_id)
+        if not doc:return
+        sources=self.store.sources(doc_id)
+        marked=[b for b in doc.blocks if b.type=='tab' and b.table and 'V4' not in b.qa_flags and b.id in sources
+                and suspicious_table(b.table,sources[b.id]['block'].en or '')]
+        for b in marked:b.qa_flags=sorted(set(b.qa_flags+['V4']))
+        if marked:
+            self.store.save_blocks(doc_id,marked)
+            self.refresh_review(doc_id)
 
     async def close(self):
         self.closing=True
@@ -468,7 +491,7 @@ class Pipeline:
         # Round 1: table/equation images and the glossary do not depend on each other.
         restored=set(checkpoint.get('restored',[]))
         candidates=[b for b in doc.blocks if b.type in {'tab','eq'} and b.image_path and not sources[b.id]['references']
-                    and not (b.type=='tab' and sources[b.id]['block'].table)]
+                    and not (b.type=='tab' and trusted_table(sources[b.id]['block']))]
         def block_restored(block):
             self.store.save_blocks(doc_id,[block]);restored.add(block.id)
             self.store.update_job(doc_id,'Restore','running',.3+.15*len(restored)/max(1,len(candidates)),restored=sorted(restored))
@@ -632,7 +655,7 @@ class Pipeline:
                 if isinstance(value,ProviderError):raise ValueError(str(value))
                 if block.type=='tab':
                     recovered=parse_table(value['html']);table_grid(recovered)
-                    if source.table and numeric_locations(recovered)!=numeric_locations(source.table):
+                    if trusted_table(source) and numeric_locations(recovered)!=numeric_locations(source.table):
                         raise ValueError('Numeric cells changed')
                     recovered_text=' '.join(c.text_en for row in recovered.header+recovered.body for c in row)
                     if number_tokens(recovered_text)!=number_tokens(source.en or ''):

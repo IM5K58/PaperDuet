@@ -103,6 +103,7 @@ tbody tr:last-child td { border-bottom:none; }
 .table-legend i { display:inline-block; width:10px; height:10px; border-radius:var(--r-full); background:var(--canvas-soft); border:1px solid var(--hairline); vertical-align:-1px; }
 .table-legend strong { font-weight:var(--w-heading); color:var(--ink); }
 .table-original { margin-top:var(--s-sm); font-size:var(--t-label); color:var(--text-muted); }
+.table-suspect { margin:var(--s-xs) 0 0; padding:var(--s-xs) var(--s-sm); border-radius:var(--r-sm); background:var(--canvas-soft); color:var(--ink); font-size:var(--t-caption); line-height:var(--lh-caption); }
 .table-original summary { cursor:pointer; }
 .plain-table { white-space:pre-wrap; overflow-wrap:anywhere; font-size:var(--t-label); line-height:var(--lh-label); }
 .translation-pending { color:var(--text-muted); font-size:var(--t-label); }
