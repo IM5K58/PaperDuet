@@ -16,7 +16,10 @@ $env:PAPERDUET_UPDATE_URL=$UpdateUrl
 $env:PAPERDUET_UPDATE_PUBLIC_KEY=(Get-Content -LiteralPath $PublicKeyFile -Raw).Trim()
 if (-not $env:PAPERDUET_UPDATE_PUBLIC_KEY) { throw 'Public key is empty.' }
 New-Item -ItemType Directory -Force -Path build | Out-Null
-[IO.File]::WriteAllText((Join-Path (Get-Location) 'build/update-tauri.json'),'{"bundle":{"createUpdaterArtifacts":true},"plugins":{"updater":{"windows":{"installMode":"passive"}}}}',[Text.UTF8Encoding]::new($false))
+# The updater plugin refuses to load (and the app to start) when plugins.updater
+# lacks pubkey, so the key and endpoint go into the config as well as the binary.
+$updateConfig=@{bundle=@{createUpdaterArtifacts=$true};plugins=@{updater=@{pubkey=$env:PAPERDUET_UPDATE_PUBLIC_KEY;endpoints=@($UpdateUrl);windows=@{installMode='passive'}}}}
+[IO.File]::WriteAllText((Join-Path (Get-Location) 'build/update-tauri.json'),($updateConfig|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 & "$PSScriptRoot/build-sidecar.ps1" -DisableCli:$DisableCli
 npx.cmd tauri build --bundles nsis --config build/update-tauri.json
 if ($LASTEXITCODE -ne 0) { throw 'Signed installer build failed.' }
