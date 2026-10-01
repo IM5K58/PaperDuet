@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as Reader } from './reader';
 import { Tutorial, lastTutorialScene } from './tutorial';
 import { AppSettings, ArxivInput, type UpdateInfo } from './m4';
@@ -21,6 +21,21 @@ function since(value?: string) {
   return RELATIVE.format(Math.round(seconds / 86400), 'day');
 }
 
+type SortKey='recent'|'added'|'title';
+const PAGE_SIZE=10;
+// First, last, and the pages around the current one; gaps in between.
+function pageNumbers(page:number,pages:number){
+  const keep=[...new Set([1,page-1,page,page+1,pages])].filter(p=>p>=1&&p<=pages).sort((a,b)=>a-b);
+  return keep.flatMap((p,i)=>i&&p-keep[i-1]>1?['gap' as const,p]:[p]);
+}
+function Pagination({page,pages,onPage}:{page:number;pages:number;onPage:(page:number)=>void}){
+  return <nav className="pagination" aria-label="논문 목록 페이지">
+    <button aria-label="이전 페이지" disabled={page===1} onClick={()=>onPage(page-1)}><Icon name="chevronLeft"/></button>
+    {pageNumbers(page,pages).map((p,i)=>p==='gap'?<span key={`gap-${i}`} className="pagination-gap" aria-hidden="true">…</span>:
+      <button key={p} aria-label={`${p}페이지`} aria-current={p===page?'page':undefined} onClick={()=>onPage(p)}>{p}</button>)}
+    <button aria-label="다음 페이지" disabled={page===pages} onClick={()=>onPage(page+1)}><Icon name="chevronRight"/></button>
+  </nav>;
+}
 const LOAD_ERROR='서재를 불러오지 못했습니다. 다시 시도해 주세요.';
 const LABELS: Record<string,string>={fixture:'샘플',queued:'처리 대기',running:'처리 중',batch_waiting:'제공자 대기 중',awaiting_ai:'AI 연결 필요',ready_to_translate:'번역 준비됨',paused:'일시정지',failed:'처리 실패',review:'검수 필요',complete:'완료'};
 const STAGES: Record<string,string>={Ingest:'파일 확인',Extract:'원문 추출',Structure:'구조 정리',Restore:'표·수식 복원',Glossary:'용어집',Translate:'전문 번역',Annotate:'맥락 주석',Validate:'검증',Render:'리더 완성'};
@@ -32,6 +47,15 @@ export function Workspace() {
   const [items,setItems]=useState<LibraryItem[]>([]);
   const [selected,setSelected]=useState<string|null>(null);
   const [removing,setRemoving]=useState<LibraryItem|null>(null);
+  // Saved papers: title search, sort (remembered on this PC), ten per page.
+  const [query,setQuery]=useState('');const [page,setPage]=useState(1);
+  const [sort,setSort]=useState<SortKey>(()=>{try{const saved=localStorage.getItem('paperduet-library-sort');return saved==='added'||saved==='title'?saved:'recent';}catch{return 'recent';}});
+  const matched=useMemo(()=>{const q=query.trim().toLocaleLowerCase();const list=q?items.filter(i=>i.title.toLocaleLowerCase().includes(q)):[...items];
+    // 'recent' keeps the library's own order: last opened, else last added.
+    if(sort==='title')list.sort((a,b)=>a.title.localeCompare(b.title,'ko',{numeric:true}));else if(sort==='added')list.sort((a,b)=>(b.created_at??'').localeCompare(a.created_at??''));
+    return list;},[items,query,sort]);
+  const pages=Math.max(1,Math.ceil(matched.length/PAGE_SIZE));const current=Math.min(page,pages);
+  const pageItems=matched.slice((current-1)*PAGE_SIZE,current*PAGE_SIZE);
   const [settings,setSettings]=useState(false);
   const [appSettings,setAppSettings]=useState(false);const [update,setUpdate]=useState<UpdateInfo|null>(null);
   // Closing the notice lasts until the app restarts; it returns on every launch until updated.
@@ -58,7 +82,7 @@ export function Workspace() {
   // Until the user adds a paper the page leads with import; afterwards it leads with the list.
   const firstRun=!items.some(item=>item.status!=='fixture');
   const recent=items.find(item=>item.opened_at&&item.block_count>0);
-  const arxiv=<ArxivInput onImported={id=>{setSelected(id);void refresh();}}/>;
+  const arxiv=<ArxivInput onImported={id=>{setSelected(id);setPage(1);void refresh();}}/>;
   const tutorialLink=<button className="library-tutorial-link" onClick={()=>navigate('tutorial')}><b>?</b><span><strong>처음이라면, 사용 가이드부터</strong><small>AI 연결부터 번역·질문·발표 준비까지 10개 설명으로 알아보세요.</small></span><Icon name="arrowRight"/></button>;
   const openSample=()=>hasSample?navigate('reader','rex-omni'):navigate('library');
   const [loading,setLoading]=useState(true);
@@ -71,7 +95,7 @@ export function Workspace() {
     if(!file.name.toLowerCase().endsWith('.pdf')){setError('PDF 파일을 선택해 주세요.');return;}
     if(file.size>150*1024*1024){setError('PDF는 150MB 이하만 지원합니다.');return;}
     uploadLock.current=true;setUploading(true);setError('');
-    try{const result=await request<{doc_id:string}>('/documents',{method:'POST',body:file,headers:{'Content-Type':'application/pdf'}});setSelected(result.doc_id);await refresh();}
+    try{const result=await request<{doc_id:string}>('/documents',{method:'POST',body:file,headers:{'Content-Type':'application/pdf'}});setSelected(result.doc_id);setPage(1);await refresh();}
     catch(e){setError((e as Error).message);}finally{uploadLock.current=false;setUploading(false);if(input.current)input.current.value='';}
   };
   return <>{screen==='tutorial'?<Tutorial sceneId={tutorialScene} hasSample={hasSample} onScene={id=>{setTutorialScene(id);history.pushState(null,'',`?tutorial=${id}`);}} onGo={target=>{if(target==='connection')setSettings(true);else if(target==='settings')setAppSettings(true);else if(target==='sample')openSample();else navigate('library');}}/>:screen==='reader'?<Reader key={docId} docId={docId} onLibrary={()=>navigate('library')} onTutorial={()=>navigate('tutorial')} onProcess={()=>{setSelected(docId);navigate('library');}}/>:
@@ -88,8 +112,10 @@ export function Workspace() {
       {firstRun?<><section className="upload-zone" aria-label="PDF 업로드">
         <div className="upload-icon"><Icon name="upload"/></div><h2>{uploading?<><span className="spinner" aria-hidden="true"/>PDF를 가져오고 있습니다…</>:'PDF를 여기에 놓으세요'}</h2><p>최대 150MB · 원본은 이 PC에 저장됩니다.</p><button className="primary-button" disabled={uploading} onClick={()=>input.current?.click()}>PDF 파일 선택</button><small>AI 연결 전에도 원문을 읽을 수 있습니다. 번역은 예상 사용량을 확인한 후 시작합니다.</small>
       </section>{arxiv}</>:recent&&<section className="continue-card" aria-label="이어 읽기"><div className="continue-cover" aria-hidden="true">{recent.title}</div><div className="continue-body"><span className="continue-label">이어 읽기</span><p className="continue-title">{recent.title}</p><p>{since(recent.opened_at)} 마지막으로 읽음</p></div><button className="primary-button" onClick={()=>navigate('reader',recent.id)}>이어서 읽기<Icon name="arrowRight"/></button></section>}
-      <div className="library-section-title"><h2>저장한 논문 <span>{items.length}</span></h2><button onClick={()=>void refresh()}>새로고침</button></div>
-      <div className="paper-list">{items.map(item=>{const job=jobs.active[item.id];const status=job?.status??item.status;return <article className="paper-item" key={item.id}><div className="paper-item-content"><h3>{item.title}</h3><p>{item.status==='fixture'?'Rex-Omni · 대역과 주석이 준비된 샘플':`${item.page_count}쪽 · ${item.block_count}블록`}{item.opened_at?` · ${since(item.opened_at)} 읽음`:''}</p></div><span className={`state-badge state-${status}`}>{job&&<span className="spinner" aria-hidden="true"/>}{LABELS[status]??status}{job?` · ${Math.round(job.progress*100)}%`:''}</span><div className="paper-actions"><button disabled={!item.block_count} onClick={()=>navigate('reader',item.id)}>논문 열기</button>{item.status!=='fixture'&&<button onClick={()=>setSelected(item.id)}>처리 상태</button>}<button className="icon-button paper-delete" aria-label={`${item.title} 삭제`} title="논문 삭제" onClick={()=>setRemoving(item)}><Icon name="trash"/></button></div></article>;})}</div>
+      <div className="library-section-title"><h2>저장한 논문 <span>{items.length}</span></h2><div className="library-tools"><label className="library-search"><Icon name="search"/><input type="search" aria-label="논문 제목 검색" placeholder="제목 검색" value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}}/></label><select aria-label="정렬" value={sort} onChange={e=>{const next=e.target.value as SortKey;setSort(next);setPage(1);try{localStorage.setItem('paperduet-library-sort',next);}catch{/* The order simply resets next time. */}}}><option value="recent">최근 읽은 순</option><option value="added">최근 추가 순</option><option value="title">제목 순</option></select><button onClick={()=>void refresh()}>새로고침</button></div></div>
+      {query.trim()&&<p className="library-result" role="status">{matched.length?`‘${query.trim()}’ 검색 결과 ${matched.length}편`:`‘${query.trim()}’와 일치하는 논문이 없습니다.`}</p>}
+      <div className="paper-list">{pageItems.map(item=>{const job=jobs.active[item.id];const status=job?.status??item.status;return <article className="paper-item" key={item.id}><div className="paper-item-content"><h3>{item.title}</h3><p>{item.status==='fixture'?'Rex-Omni · 대역과 주석이 준비된 샘플':`${item.page_count}쪽 · ${item.block_count}블록`}{item.opened_at?` · ${since(item.opened_at)} 읽음`:''}</p></div><span className={`state-badge state-${status}`}>{job&&<span className="spinner" aria-hidden="true"/>}{LABELS[status]??status}{job?` · ${Math.round(job.progress*100)}%`:''}</span><div className="paper-actions"><button disabled={!item.block_count} onClick={()=>navigate('reader',item.id)}>논문 열기</button>{item.status!=='fixture'&&<button onClick={()=>setSelected(item.id)}>처리 상태</button>}<button className="icon-button paper-delete" aria-label={`${item.title} 삭제`} title="논문 삭제" onClick={()=>setRemoving(item)}><Icon name="trash"/></button></div></article>;})}</div>
+      {pages>1&&<Pagination page={current} pages={pages} onPage={p=>{setPage(p);document.querySelector('.library-section-title')?.scrollIntoView({block:'start'});}}/>}
       {!firstRun&&<section className="import-panel" aria-label="논문 가져오기"><div className="import-drop"><Icon name="upload"/><span><b>{uploading?'PDF를 가져오고 있습니다…':'PDF를 끌어다 놓거나'}</b> 파일을 선택하세요 · 최대 150MB</span><button disabled={uploading} onClick={()=>input.current?.click()}>PDF 파일 선택</button></div>{arxiv}</section>}
       {!guideSeen&&!firstRun&&tutorialLink}
       <p className="library-footnote">번역 언어는 한국어입니다. 참고문헌은 원문을 유지합니다.</p></main></div>}

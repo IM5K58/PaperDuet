@@ -40,7 +40,7 @@
 .continue-title { margin:var(--s-xxs) 0 2px; font-size:var(--t-h4); line-height:var(--lh-h4); font-weight:var(--w-heading); letter-spacing:var(--ls-heading); color:var(--ink); overflow-wrap:anywhere; }
 .continue-body p:last-child { margin:0; font-size:var(--t-body-sm); color:var(--text-muted); }
 .continue-card .primary-button { display:inline-flex; align-items:center; gap:var(--s-xs); }
-.library-section-title { display:flex; align-items:baseline; justify-content:space-between; margin:var(--s-xl) 0 var(--s-xs); }
+.library-section-title { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--s-xs) var(--s-md); margin:var(--s-xl) 0 var(--s-xs); }
 .library-section-title h2 { font-size:var(--t-body); line-height:var(--lh-body); margin:0; }
 .library-section-title h2 span { color:var(--text-muted); margin-left:var(--s-xxs); font-weight:var(--w-text); }
 .library-section-title button { min-height:var(--control-h-sm); border-color:transparent; background:transparent; color:var(--text-muted); font-size:var(--t-label); font-weight:var(--w-text); }
@@ -79,6 +79,10 @@
 /* Dialogs: flat surface over the overlay token, never a shadow. */
 .workspace-dialog { color:var(--ink); background:var(--canvas); border:0; border-radius:var(--r-md); padding:0; width:640px; max-width:calc(100vw - var(--s-xl)); max-height:90dvh; }
 .workspace-dialog::backdrop { background:var(--overlay); }
+/* The dialog keeps its rounded corners; only the body under the title scrolls, so the
+   scrollbar no longer squares off the right-hand corners. */
+.workspace-dialog[open] { display:flex; flex-direction:column; overflow:hidden; }
+.workspace-dialog>:not(header) { flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--ink) 22%,transparent) transparent; }
 .workspace-dialog>header { display:flex; justify-content:space-between; align-items:center; gap:var(--s-sm); padding:var(--s-lg) var(--s-lg) var(--s-md); position:sticky; top:0; background:var(--canvas); z-index:1; }
 .workspace-dialog h2 { margin:0; font-size:var(--t-h4); line-height:var(--lh-h4); }
 .workspace-dialog>header button { display:grid; place-items:center; width:var(--control-h); height:var(--control-h); padding:0; color:var(--text-muted); border-color:transparent; background:transparent; flex-shrink:0; }
@@ -229,3 +233,22 @@
 .terms ol { margin:0; padding-left:1.4em; display:grid; gap:var(--s-xxs); }
 .terms p,.terms li { color:var(--ink-soft); }
 .terms-date { color:var(--text-muted); }
+
+/* Saved papers: search, sort and pages of ten */
+.library-tools { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s-xs); }
+.library-search { position:relative; display:flex; align-items:center; }
+.library-search .icon { position:absolute; left:10px; width:16px; height:16px; color:var(--text-muted); pointer-events:none; }
+.library-search input { width:210px; min-height:var(--control-h-sm); padding:0 var(--s-sm) 0 32px; font-size:var(--t-label); }
+.library-tools select { min-height:var(--control-h-sm); padding:0 var(--s-sm); font-size:var(--t-label); }
+.library-result { margin:0 0 var(--s-xs); color:var(--text-muted); font-size:var(--t-label); }
+.pagination { display:flex; justify-content:center; align-items:center; gap:var(--s-xxs); margin:var(--s-md) 0 0; }
+.pagination button { min-width:var(--control-h-sm); padding:0 var(--s-xs); color:var(--text-muted); background:transparent; border-color:transparent; font-weight:var(--w-text); font-variant-numeric:tabular-nums; }
+.pagination button:hover:not(:disabled) { color:var(--ink); background:var(--canvas-soft); }
+.pagination button[aria-current=page] { color:var(--on-primary); background:var(--primary); border-color:var(--primary); font-weight:var(--w-strong); }
+.pagination button:disabled { color:var(--text-faint); background:transparent; border-color:transparent; }
+.pagination-gap { padding:0 var(--s-xxs); color:var(--text-faint); }
+@media(max-width:600px) {
+  .library-tools { width:100%; }
+  .library-search { flex:1; }
+  .library-search input { width:100%; }
+}
