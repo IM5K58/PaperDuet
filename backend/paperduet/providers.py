@@ -69,16 +69,34 @@ def decode_answer(answer):
 
 
 class StructuredAdapter:
+    # Errors that can strike after the answer has started (Gemini sends 503 "high
+    # demand" mid-stream). A pipeline answer is only collected, never shown, so the
+    # whole request is simply sent again after a pause.
+    TRANSIENT = frozenset()
+    TRANSIENT_DELAYS = (5, 15, 30)
+
     async def json(self, stage, model, payload, image=None):
         prompt = prompt_for(stage)
         total = {'tokens_in': 0, 'tokens_out': 0, 'cache_read': 0, 'cache_write': 0, 'requests': 0}
+        def add(usage):
+            for key, value in (usage or {}).items():
+                total[key] = total.get(key, 0) + value
         for attempt in range(2):
-            answer = ''
-            total['requests'] += 1
-            async for event in self.stream(model, prompt, [{'role':'user','content':json.dumps(payload,ensure_ascii=False)}], image, effort=STAGE_EFFORT.get(stage)):
-                answer += event.get('text','')
-                for key, value in event.get('usage',{}).items():
-                    total[key] = total.get(key, 0) + value
+            for delay in (*self.TRANSIENT_DELAYS, None):
+                answer = ''
+                total['requests'] += 1
+                try:
+                    async for event in self.stream(model, prompt, [{'role':'user','content':json.dumps(payload,ensure_ascii=False)}], image, effort=STAGE_EFFORT.get(stage)):
+                        answer += event.get('text','')
+                        add(event.get('usage'))
+                    break
+                except ProviderError as error:
+                    add(error.usage)
+                    if str(error) not in self.TRANSIENT or delay is None:
+                        # Bill every partial attempt, not just the last one.
+                        if total['tokens_in'] or total['tokens_out']: error.usage = total
+                        raise
+                await asyncio.sleep(delay)
             try:
                 return decode_answer(answer), total
             except (ValueError,TypeError):
@@ -167,19 +185,37 @@ class APIProvider(StructuredAdapter):
         return f'/v1beta/models/{model}:streamGenerateContent?alt=sse',{'systemInstruction':{'parts':[{'text':system}]},'contents':prepared,'generationConfig':config}
 
     # Busy providers (Gemini "high demand", Anthropic "overloaded") usually recover in
-    # seconds. Retry only before the first chunk, so an answer is never sent twice.
+    # seconds. Retry only before the first chunk, so an Ask answer is never shown twice;
+    # pipeline requests are retried whole on top of this (StructuredAdapter.json).
     RETRY_DELAYS=(2,5,10)
+    TRANSIENT=frozenset({'AI_OVERLOADED','AI_RATE_LIMIT','AI_NETWORK_ERROR','AI_STREAM_INTERRUPTED'})
+
+    @staticmethod
+    def stream_error(data):
+        """Classify an error event sent inside a stream that began with HTTP 200:
+        Gemini {"error":{"code":503,"status":"UNAVAILABLE"}}, Anthropic
+        {"type":"error","error":{"type":"overloaded_error"}}, OpenAI {"type":"error","code":...}."""
+        error=data.get('error') if isinstance(data.get('error'),dict) else data
+        code=error.get('code');text=json.dumps(error).lower()
+        if code==429 or any(w in text for w in ('resource_exhausted','rate_limit')): return 'AI_RATE_LIMIT'
+        if (isinstance(code,int) and code>=500) or any(w in text for w in ('overloaded','unavailable','high demand','internal','server_error','api_error','deadline')):
+            return 'AI_OVERLOADED'
+        return 'AI_REQUEST_FAILED'
 
     async def stream(self, model, system, messages, image=None, effort=None):
+        spent={}  # tokens billed by attempts that broke before showing anything
+        merge=lambda usage:{k:(usage or {}).get(k,0)+spent.get(k,0) for k in {*(usage or {}),*spent}}
         for delay in (*self.RETRY_DELAYS,None):
             started=False
             try:
                 async for event in self.stream_once(model,system,messages,image,effort):
                     started=True
-                    yield event
+                    yield {'usage':merge(event['usage'])} if 'usage' in event else event
                 return
             except ProviderError as error:
+                if spent:error.usage=merge(error.usage)
                 if str(error)!='AI_OVERLOADED' or started or delay is None: raise
+                spent={**(error.usage or {})};spent['requests']=spent.get('requests',0)+1
             await asyncio.sleep(delay)
 
     async def stream_once(self, model, system, messages, image=None, effort=None):
@@ -196,7 +232,7 @@ class APIProvider(StructuredAdapter):
                         value=line[5:].strip()
                         if value=='[DONE]': continue
                         data=json.loads(value);kind=data.get('type');delta=''
-                        if kind=='error' or data.get('error'): raise ProviderError('AI_OVERLOADED' if 'overloaded' in json.dumps(data.get('error')).lower() else 'AI_REQUEST_FAILED',usage=usage)
+                        if kind=='error' or data.get('error'): raise ProviderError(self.stream_error(data),usage=usage)
                         if self.id=='anthropic':
                             if kind=='content_block_delta' and data.get('delta',{}).get('type')=='text_delta': delta=data['delta']['text']
                             if kind=='message_start':

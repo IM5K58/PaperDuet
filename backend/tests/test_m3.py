@@ -330,10 +330,30 @@ def test_busy_provider_is_retried_before_the_first_chunk_and_reported_as_busy():
     def recovering(request):
         calls.append(request);return httpx.Response(503) if len(calls)<3 else httpx.Response(200,text=answer)
     def provider(handler):
-        p=APIProvider('google',Vault('test-key-secret-value'),httpx.MockTransport(handler));p.RETRY_DELAYS=(0,0,0);return p
+        p=APIProvider('google',Vault('test-key-secret-value'),httpx.MockTransport(handler));p.RETRY_DELAYS=(0,0,0);p.TRANSIENT_DELAYS=(0,0,0);return p
     value,usage=asyncio.run(provider(recovering).json('translate','gemini-3.8-flash',{'blocks':[]}))
     assert value=={'ok':1} and len(calls)==3 and usage['tokens_in']==3
     with pytest.raises(ProviderError,match='AI_OVERLOADED'):
         asyncio.run(provider(lambda r:httpx.Response(503)).json('translate','gemini-3.8-flash',{}))
     with pytest.raises(ProviderError,match='AI_MODEL_NOT_FOUND'):
         asyncio.run(provider(lambda r:httpx.Response(404)).json('translate','gemini-9-nope',{}))
+
+def test_busy_error_in_the_middle_of_an_answer_is_retried_for_the_pipeline():
+    # Observed from Gemini: HTTP 200, a few chunks of the answer, then a 503 event.
+    usage={'promptTokenCount':3,'candidatesTokenCount':1}
+    chunk=lambda text,**extra:'data: '+json.dumps({'candidates':[{'content':{'parts':[{'text':text}]},**extra}],'usageMetadata':usage})+'\n\n'
+    broken=chunk('{"blocks":[{"id":"b0000","ko":"초록"},{"id":"b0001","ko":"본 논문은')+'data: '+json.dumps({'error':{'code':503,'message':'This model is currently experiencing high demand.','status':'UNAVAILABLE'}})+'\n\n'
+    calls=[]
+    def flaky(request):
+        calls.append(request);return httpx.Response(200,text=broken if len(calls)<3 else chunk('{"ok": 1}',finishReason='STOP'))
+    p=APIProvider('google',Vault('test-key-secret-value'),httpx.MockTransport(flaky));p.RETRY_DELAYS=(0,0,0);p.TRANSIENT_DELAYS=(0,0,0)
+    value,total=asyncio.run(p.json('translate','gemini-3.8-flash',{'blocks':[]}))
+    assert value=={'ok':1} and len(calls)==3
+    assert total['tokens_in']==9 and total['requests']==3  # the broken attempts are billed too
+    # Ask streams to the reader, so it is not resent mid-answer, but says the server is busy.
+    async def ask():
+        return [e async for e in APIProvider('google',Vault('test-key-secret-value'),httpx.MockTransport(lambda r:httpx.Response(200,text=broken))).stream('gemini-3.8-flash','s',[{'role':'user','content':'q'}])]
+    with pytest.raises(ProviderError,match='AI_OVERLOADED'):asyncio.run(ask())
+    assert APIProvider.stream_error({'error':{'code':429,'status':'RESOURCE_EXHAUSTED'}})=='AI_RATE_LIMIT'
+    assert APIProvider.stream_error({'type':'error','error':{'type':'overloaded_error'}})=='AI_OVERLOADED'
+    assert APIProvider.stream_error({'error':{'code':400,'status':'INVALID_ARGUMENT'}})=='AI_REQUEST_FAILED'
