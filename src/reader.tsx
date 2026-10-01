@@ -4,7 +4,7 @@ import { AskPanel, SelectionActions, useAsk } from './ask';
 import { PdfPreview } from './pdf-preview';
 import { DocumentActions } from './m4';
 import { Inline, NOTE_NAMES, ReaderBlock } from './blocks';
-import { Icon } from './icons';
+import { BrandMark, Icon } from './icons';
 import type { Block, Document, NoteKind, Settings, View } from './types';
 
 const INITIAL: Settings = { view: 'split', theme: 'system', font_size: 16, show_notes: true, note_kinds: ['key', 'res', 'lim', 'ins', 'mth', 'trm'], density: 'high' };
@@ -197,14 +197,14 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
     if (a) { event.preventDefault(); jump(a.hash.slice(1)); }
   };
 
-  if (loading || error) return <div className="startup"><div className="brand-mark">P<span>D</span></div><h1>PaperDuet</h1>
+  if (loading || error) return <div className="startup"><BrandMark className="brand-mark startup-mark"/><h1>PaperDuet</h1>
     <p role={error ? 'alert' : 'status'}>{error || '로컬 서재를 열고 있습니다…'}</p>{error && <button onClick={() => void load()}>연결 재시도</button>}</div>;
   if (!doc) return null;
   return <div className={`reader ${ask.anchor?'with-ask':''}`} onClick={anchorClick}>
     <a className="skip-link" href="#paper">본문으로 이동</a>
     <header className="topbar"><div className="toolbar">
       <button ref={menuRef} className="menu-button" aria-label="목차 열기" aria-expanded={drawer} aria-controls="toc" onClick={() => setDrawer(true)}><Icon name="menu"/></button>
-      {onLibrary&&!offline?<a className="brand brand-link" href="?library=1" title="서재로 이동" aria-label="PaperDuet · 서재로 이동" onClick={e=>{e.preventDefault();onLibrary();}}><span className="brand-mark">P<span>D</span></span><b>PaperDuet</b></a>:<div className="brand"><span className="brand-mark">P<span>D</span></span><b>PaperDuet</b></div>}
+      {onLibrary&&!offline?<a className="brand brand-link" href="?library=1" title="서재로 이동" aria-label="PaperDuet · 서재로 이동" onClick={e=>{e.preventDefault();onLibrary();}}><BrandMark/><b>PaperDuet</b></a>:<div className="brand"><BrandMark/><b>PaperDuet</b></div>}
       <span className="brand-divider" aria-hidden="true"/><span className="paper-name" title={doc.title}>{doc.title}</span>
       <div className="view-controls" role="group" aria-label="보기 모드">{([['en', '원문'], ['split', '대역'], ['ko', '번역']] as const).map(([mode, name]) =>
         <button key={mode} aria-pressed={settings.view === mode} onClick={() => setSettings(s => ({ ...s, view: mode }))}>{name}</button>)}</div>

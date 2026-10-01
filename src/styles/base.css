@@ -55,8 +55,8 @@ code { font:var(--w-text) .9em var(--font); background:var(--canvas-soft); color
 .icon { display:block; flex:none; width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
 .brand { display:flex; align-items:center; gap:var(--s-sm); margin-right:auto; white-space:nowrap; color:var(--ink); }
 .brand b { font-size:var(--t-body); font-weight:var(--w-heading); }
-.brand-mark { display:inline-flex; align-items:center; justify-content:center; color:var(--on-primary); background:var(--primary); font:var(--w-heading) var(--t-body-sm)/1 var(--font); width:var(--s-xl); height:var(--s-xl); border-radius:var(--r-squircle); }
-.brand-mark span { color:var(--text-faint); }
+.brand-mark { display:block; flex-shrink:0; width:var(--s-xl); height:var(--s-xl); }
+.startup-mark { width:56px; height:56px; margin-bottom:var(--s-sm); }
 .toolbar .brand { margin-right:0; }
 .brand-divider { height:var(--s-md); border-left:1px solid var(--hairline); margin:0 calc(-1 * var(--s-xs)); }
 .paper-name { color:var(--text-muted); font-size:var(--t-body-sm); margin-right:auto; min-width:0; max-width:48ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Inline, NOTE_NAMES } from './blocks';
-import { Icon } from './icons';
+import { BrandMark, Icon } from './icons';
 import type { NoteKind, View } from './types';
 import './tutorial.css';
 
@@ -39,7 +39,7 @@ export function Tutorial({sceneId,onScene,onGo,hasSample=true}:{sceneId:string;o
   const markDone=()=>setDone(values=>values.includes(scene.id)?values:[...values,scene.id]);
   return <div className="tutorial-page">
     <a className="skip-link" href="#tutorial-scene-title">본문으로 이동</a>
-    <header className="tutorial-header"><a className="brand" href="?library=1" onClick={e=>{e.preventDefault();onGo('library');}}><span className="brand-mark">P<span>D</span></span><b>PaperDuet</b><span className="tutorial-header-label">사용 가이드</span></a><div><button aria-label="가이드 테마 변경" onClick={()=>setTheme(theme==='dark'?'light':theme==='light'?'system':'dark')}>{{system:'◐ 시스템',light:'☀ 라이트',dark:'☾ 다크'}[theme]||'◐ 테마'}</button><button onClick={()=>onGo('library')}>서재로</button></div></header>
+    <header className="tutorial-header"><a className="brand" href="?library=1" onClick={e=>{e.preventDefault();onGo('library');}}><BrandMark/><b>PaperDuet</b><span className="tutorial-header-label">사용 가이드</span></a><div><button aria-label="가이드 테마 변경" onClick={()=>setTheme(theme==='dark'?'light':theme==='light'?'system':'dark')}>{{system:'◐ 시스템',light:'☀ 라이트',dark:'☾ 다크'}[theme]||'◐ 테마'}</button><button onClick={()=>onGo('library')}>서재로</button></div></header>
     <div className="tutorial-layout"><aside className="tutorial-sidebar"><div className="eyebrow">Get to know PaperDuet</div><h1>어려운 영어 논문을<br/>한국어로 이해해보세요.</h1><div className="tutorial-completion"><span>확인한 설명 <b>{done.length} / {SCENES.length}</b></span><progress aria-label="가이드 완료 진행률" max={SCENES.length} value={done.length}/></div><nav aria-label="가이드 설명">{SCENES.map((s,i)=><button key={s.id} aria-current={s.id===scene.id?'step':undefined} onClick={()=>onScene(s.id)}><span className="tutorial-step-number">{String(i+1).padStart(2,'0')}</span><span>{s.label}</span>{done.includes(s.id)&&<span className="tutorial-tick" aria-label="확인 완료">✓</span>}</button>)}</nav><div className="tutorial-sidebar-note">가이드는 설명용 예시입니다.<br/>실제 AI를 호출하거나<br/>논문 데이터를 바꾸지 않습니다.</div></aside>
       <main className="tutorial-main"><div className="tutorial-mobile-index"><label>설명 선택<select value={scene.id} onChange={e=>onScene(e.target.value)}>{SCENES.map((s,i)=><option key={s.id} value={s.id}>{i+1}. {s.label}{done.includes(s.id)?' ✓':''}</option>)}</select></label><span>{done.length}/10 확인</span></div>
         <div className="tutorial-scene-intro"><span className="eyebrow">설명 {String(index+1).padStart(2,'0')} / 10</span><h2 id="tutorial-scene-title" ref={title} tabIndex={-1}>{scene.title}</h2><p>{scene.intro}</p><div className="tutorial-location"><span>찾아가기</span>{scene.where}</div></div>

@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ERROR_TEXT, authorizedFetch, request } from './api';
 import type { Job, LibraryItem, PipelineOptions } from './types';
 import { DEFAULTS, Modal, ModelChoices, ProviderPanel, type ProviderSettings } from './connections';
-import { Icon } from './icons';
+import { BrandMark, Icon } from './icons';
 
 // opened_at is SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:MM:SS", UTC).
 const RELATIVE = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' });
@@ -72,7 +72,7 @@ export function Workspace() {
   };
   return <>{screen==='tutorial'?<Tutorial sceneId={tutorialScene} hasSample={hasSample} onScene={id=>{setTutorialScene(id);history.pushState(null,'',`?tutorial=${id}`);}} onGo={target=>{if(target==='connection')setSettings(true);else if(target==='settings')setAppSettings(true);else if(target==='sample')openSample();else navigate('library');}}/>:screen==='reader'?<Reader key={docId} docId={docId} onLibrary={()=>navigate('library')} onTutorial={()=>navigate('tutorial')} onProcess={()=>{setSelected(docId);navigate('library');}}/>:
     <div className={`library-page ${drag?'dragging':''}`} onDragOver={e=>{if(!e.dataTransfer.types.includes('Files'))return;e.preventDefault();setDrag(true);}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node|null))setDrag(false);}} onDrop={e=>{e.preventDefault();setDrag(false);void upload(e.dataTransfer.files[0]);}}>
-      <header className="topbar library-bar"><div className="toolbar"><a className="brand" href="?library=1" onClick={e=>e.preventDefault()}><span className="brand-mark">P<span>D</span></span><b>PaperDuet</b></a>
+      <header className="topbar library-bar"><div className="toolbar"><a className="brand" href="?library=1" onClick={e=>e.preventDefault()}><BrandMark/><b>PaperDuet</b></a>
         <div className="appbar-actions"><button onClick={()=>navigate('tutorial')}>사용 가이드</button><button onClick={()=>setSettings(true)}>AI 연결 설정</button><button onClick={()=>setAppSettings(true)}>{updateAvailable?'새 업데이트 · 앱 설정':'앱 설정'}</button>
           <button className="primary-button" disabled={uploading} onClick={()=>input.current?.click()}>{uploading?<span className="spinner" aria-hidden="true"/>:<Icon name="plus"/>}논문 추가</button></div></div></header>
       <input ref={input} type="file" accept=".pdf,application/pdf" aria-label="PDF 파일" hidden onChange={e=>void upload(e.target.files?.[0])}/>

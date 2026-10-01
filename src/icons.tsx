@@ -30,3 +30,12 @@ export type IconName = keyof typeof PATHS;
 export function Icon({ name }: { name: IconName }) {
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{PATHS[name].map(d => <path key={d} d={d} />)}</svg>;
 }
+
+// The app icon (src-tauri/icons/icon.svg), inline so the offline export needs no asset.
+export function BrandMark({ className = 'brand-mark' }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 128 128" aria-hidden="true" focusable="false">
+    <rect width="128" height="128" rx="28" fill="#185fc2" />
+    <path d="M29 32h28c19 0 30 10 30 26S76 84 57 84H43v18H29zm14 13v26h14c11 0 16-4 16-13s-5-13-16-13z" fill="#fff" />
+    <path d="M88 42h11v57H67V87h21z" fill="#a7ccff" />
+  </svg>;
+}
