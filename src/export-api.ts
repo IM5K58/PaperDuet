@@ -1,7 +1,8 @@
 // This transport is compiled ONLY into standalone HTML. No network or native IPC.
+import { resolveTheme } from './theme';
 import type { Document, Settings } from './types';
 export const exported=JSON.parse(document.getElementById('paperduet-data')!.textContent!) as {document:Document;images:Record<string,string>};
-const defaults:Settings={view:'split',theme:'system',font_size:16,show_notes:true,note_kinds:['key','res','lim','ins','mth','trm'],density:'high'};
+const defaults:Settings={view:'split',theme:resolveTheme(),font_size:16,show_notes:true,note_kinds:['key','res','lim','ins','mth','trm'],density:'high'};
 const prefix='paperduet-export:'+exported.document.id+':';
 const memory:Record<string,unknown>={};
 function read(key:string,fallback:unknown){try{return JSON.parse(localStorage.getItem(prefix+key)||'null')??memory[key]??fallback;}catch{return memory[key]??fallback;}}

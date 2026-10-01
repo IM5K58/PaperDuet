@@ -194,7 +194,7 @@ for (const width of [390, 720, 1024, 1440]) {
     }
     await page.getByRole('button', { name: '대역', exact: true }).click();
     await page.screenshot({ path: testInfo.outputPath(`reader-${width}-dark.png`) });
-    await page.getByRole('button', { name: '테마 변경' }).click(); // dark -> system (light)
+    await page.getByRole('button', { name: '테마 변경' }).click(); // dark -> light
     await page.screenshot({ path: testInfo.outputPath(`reader-${width}-light.png`) });
     expect(external).toEqual([]); expect(errors).toEqual([]);
   });

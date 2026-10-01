@@ -11,6 +11,15 @@ pub fn location(default:&Path,config:&Path)->PathBuf{
         .and_then(|v|v["path"].as_str().map(PathBuf::from)).filter(|p|p.is_absolute()).unwrap_or(default.to_path_buf())
 }
 fn allowed(window:&tauri::WebviewWindow)->Result<(),String>{if window.label()=="main"{Ok(())}else{Err("허용되지 않은 창입니다.".into())}}
+// Only these pages open in the default browser; the window cannot ask for any other URL.
+const LINKS:[&str;4]=["https://github.com/IM5K58/PaperDuet/releases/latest","https://github.com/IM5K58/PaperDuet",
+    "https://forms.gle/aFKGWLuKtdAFjwHV6","https://vierasion.com/"];
+#[tauri::command]
+pub fn open_link(window:tauri::WebviewWindow,url:String)->Result<(),String>{
+    allowed(&window)?;
+    if !LINKS.contains(&url.as_str()){return Err("열 수 없는 주소입니다.".into());}
+    std::process::Command::new("explorer.exe").arg(&url).spawn().map(|_|()).map_err(|_|"브라우저를 열지 못했습니다.".into())
+}
 fn valid_document_id(id:&str)->bool{
     !id.is_empty()&&!matches!(id,"."|"..")&&id.bytes().all(|b|b.is_ascii_alphanumeric()||matches!(b,b'-'|b'_'|b'.'))
 }

@@ -5,9 +5,10 @@ import { PdfPreview } from './pdf-preview';
 import { DocumentActions } from './m4';
 import { Inline, NOTE_NAMES, ReaderBlock } from './blocks';
 import { BrandMark, Icon } from './icons';
+import { resolveTheme } from './theme';
 import type { Block, Document, NoteKind, Settings, View } from './types';
 
-const INITIAL: Settings = { view: 'split', theme: 'system', font_size: 16, show_notes: true, note_kinds: ['key', 'res', 'lim', 'ins', 'mth', 'trm'], density: 'high' };
+const INITIAL: Settings = { view: 'split', theme: resolveTheme(), font_size: 16, show_notes: true, note_kinds: ['key', 'res', 'lim', 'ins', 'mth', 'trm'], density: 'high' };
 const textOnly = (html: string) => html.replace(/<[^>]*>/g, '').replace(/&[a-z0-9#]+;/gi, ' ');
 // Per-viewer convenience only: storage may be unavailable (private mode, exported file).
 const GUIDE_KEY = 'paperduet.readingGuideHidden';
@@ -50,6 +51,8 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
         ]);
         if (controller.signal.aborted) return;
         loadedSettings.current = JSON.stringify(preferences);
+        // An old 'system' setting resolves once and is then saved as light or dark.
+        preferences.theme = resolveTheme(preferences.theme);
         setSettings(paper.status !== 'fixture' && !paper.blocks.some(b=>b.ko) ? {...preferences,view:'en'} : preferences); setDoc(paper); setPdfOpen(!offline&&paper.source_kind!=='arxiv_html'&&paper.status!=='fixture'&&!paper.blocks.some(b=>b.ko)&&paper.page_count>0); settingsLoaded.current = true; setLoading(false); return;
       } catch {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -211,8 +214,8 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
       <div className="tools"><button onClick={() => setSearchOpen(s => !s)} aria-label="문서 검색" title="문서 검색 (Ctrl+F)"><Icon name="search"/></button>
         <button aria-label="글자 작게" title="글자 작게" disabled={settings.font_size === 13} onClick={() => setSettings(s => ({ ...s, font_size: Math.max(13, s.font_size - 1) }))}><Icon name="textSmaller"/></button>
         <button aria-label="글자 크게" title="글자 크게" disabled={settings.font_size === 21} onClick={() => setSettings(s => ({ ...s, font_size: Math.min(21, s.font_size + 1) }))}><Icon name="textLarger"/></button>
-        <button aria-label="테마 변경" title={`현재: ${{ system: '시스템 테마', light: '라이트', dark: '다크' }[settings.theme]}`} onClick={() => setSettings(s => ({ ...s, theme: ({ system: 'light', light: 'dark', dark: 'system' } as const)[s.theme] }))}>
-          <Icon name={({ system: 'system', light: 'sun', dark: 'moon' } as const)[settings.theme]}/></button>{onTutorial&&!offline&&<button aria-label="사용 가이드" title="사용 가이드" onClick={onTutorial}><Icon name="help"/></button>}</div>
+        <button aria-label="테마 변경" title={settings.theme === 'dark' ? '현재: 다크 · 라이트로 바꾸기' : '현재: 라이트 · 다크로 바꾸기'} onClick={() => setSettings(s => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))}>
+          <Icon name={settings.theme === 'dark' ? 'moon' : 'sun'}/></button>{onTutorial&&!offline&&<button aria-label="사용 가이드" title="사용 가이드" onClick={onTutorial}><Icon name="help"/></button>}</div>
     </div><div className="progress-track"><div className="progress-fill" role="progressbar" aria-label="읽기 진행률" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} style={{ width: `${progress}%` }} /></div>
     {searchOpen && <div className="search-panel" role="search"><label htmlFor="document-search">문서 검색</label><input id="document-search" ref={searchRef} value={query} placeholder="원문과 번역에서 찾기" onChange={e => { setQuery(e.target.value); setMatchIndex(0); }} onKeyDown={e => { if (e.key === 'Enter') findMatch(e.shiftKey ? matchIndex - 1 : matchIndex); }}/>
       <span role="status">{matches.length ? `${Math.min(matchIndex + 1, matches.length)} / ${matches.length}` : '0건'}</span><button onClick={() => findMatch(matchIndex - 1)} disabled={!matches.length} aria-label="이전 검색 결과"><Icon name="chevronUp"/></button><button onClick={() => findMatch(matchIndex + 1)} disabled={!matches.length} aria-label="다음 검색 결과"><Icon name="chevronDown"/></button><button onClick={() => setSearchOpen(false)} aria-label="검색 닫기"><Icon name="close"/></button></div>}

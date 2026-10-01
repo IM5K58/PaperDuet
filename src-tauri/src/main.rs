@@ -34,7 +34,7 @@ fn main() {
             app.manage(sidecar::Manager::start(backend, data, origin.into()));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![backend_connection,desktop::export_document,desktop::choose_storage,desktop::migrate_storage,desktop::update_status,desktop::check_update,desktop::install_update])
+        .invoke_handler(tauri::generate_handler![backend_connection,desktop::export_document,desktop::choose_storage,desktop::migrate_storage,desktop::update_status,desktop::check_update,desktop::install_update,desktop::open_link])
         .build(tauri::generate_context!()).expect("Cannot initialize PaperDuet");
     app.run(|handle, event| {
         if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {

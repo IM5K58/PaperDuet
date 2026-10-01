@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { App as Reader } from './reader';
 import { Tutorial, lastTutorialScene } from './tutorial';
-import { AppSettings, ArxivInput } from './m4';
+import { AppSettings, ArxivInput, type UpdateInfo } from './m4';
 import { invoke } from '@tauri-apps/api/core';
 import { ERROR_TEXT, authorizedFetch, request } from './api';
 import type { Job, LibraryItem, PipelineOptions } from './types';
 import { DEFAULTS, Modal, ModelChoices, ProviderPanel, type ProviderSettings } from './connections';
 import { BrandMark, Icon } from './icons';
+import { resolveTheme } from './theme';
 
 // opened_at is SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:MM:SS", UTC).
 const RELATIVE = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' });
@@ -32,9 +33,12 @@ export function Workspace() {
   const [selected,setSelected]=useState<string|null>(null);
   const [removing,setRemoving]=useState<LibraryItem|null>(null);
   const [settings,setSettings]=useState(false);
-  const [appSettings,setAppSettings]=useState(false);const [updateAvailable,setUpdateAvailable]=useState(false);
-  useEffect(()=>{if(localStorage.getItem('paperduet-auto-update')!=='false')void invoke<{available?:boolean}>('check_update').then(u=>setUpdateAvailable(!!u.available)).catch(()=>{});},[]);
+  const [appSettings,setAppSettings]=useState(false);const [update,setUpdate]=useState<UpdateInfo|null>(null);
+  // Closing the notice lasts until the app restarts; it returns on every launch until updated.
+  const [updateDismissed,setUpdateDismissed]=useState(false);const updateAvailable=!!update?.available;
+  useEffect(()=>{if(localStorage.getItem('paperduet-auto-update')!=='false')void invoke<UpdateInfo>('check_update').then(setUpdate).catch(()=>{});},[]);
   const [onboarding,setOnboarding]=useState(false);
+  useEffect(()=>{let stopped=false;const load=async()=>{for(let attempt=0;attempt<60&&!stopped;attempt++){try{const saved=await request<{theme?:string}>('/settings/reader');if(!stopped&&!document.documentElement.dataset.theme)document.documentElement.dataset.theme=resolveTheme(saved.theme);return;}catch{await new Promise(resolve=>setTimeout(resolve,500));}}};void load();return()=>{stopped=true;};},[]);
   useEffect(()=>{let stopped=false;const load=async()=>{for(let attempt=0;attempt<60&&!stopped;attempt++){try{const value=await request<{completed:boolean}>('/settings/onboarding');if(!stopped)setOnboarding(!value.completed&&!new URLSearchParams(location.search).has('tutorial'));return;}catch{await new Promise(resolve=>setTimeout(resolve,500));}}};void load();return()=>{stopped=true;};},[]);
   const finishOnboarding=async()=>{await request('/settings/onboarding',{method:'PUT',body:JSON.stringify({completed:true})});setOnboarding(false);};
   const [uploading,setUploading]=useState(false);
@@ -75,6 +79,7 @@ export function Workspace() {
       <header className="topbar library-bar"><div className="toolbar"><a className="brand" href="?library=1" onClick={e=>e.preventDefault()}><BrandMark/><b>PaperDuet</b></a>
         <div className="appbar-actions"><button onClick={()=>navigate('tutorial')}>사용 가이드</button><button onClick={()=>setSettings(true)}>AI 연결 설정</button><button onClick={()=>setAppSettings(true)}>{updateAvailable?'새 업데이트 · 앱 설정':'앱 설정'}</button>
           <button className="primary-button" disabled={uploading} onClick={()=>input.current?.click()}>{uploading?<span className="spinner" aria-hidden="true"/>:<Icon name="plus"/>}논문 추가</button></div></div></header>
+      {updateAvailable&&!updateDismissed&&<div className="update-banner" role="status"><Icon name="arrowUp"/><span><b>새 버전 {update!.version}</b>이 나왔습니다. 지금 쓰는 버전은 {update!.current_version}입니다.</span><button className="update-banner-action" onClick={()=>setAppSettings(true)}>업데이트</button><button className="icon-button update-banner-close" aria-label="업데이트 알림 닫기" title="닫기" onClick={()=>setUpdateDismissed(true)}><Icon name="close"/></button></div>}
       <input ref={input} type="file" accept=".pdf,application/pdf" aria-label="PDF 파일" hidden onChange={e=>void upload(e.target.files?.[0])}/>
       <main className="library-main"><h1>나의 논문 서재</h1>
       <p className="library-intro">{loading&&!items.length?'서재를 불러오는 중…':firstRun?<>한 편의 논문을, 처음부터 끝까지.<br/>AI를 연결하고 한국어 대역 리더를 만드세요.</>:`이 PC에 저장된 논문 ${items.length}편`}</p>
@@ -92,7 +97,7 @@ export function Workspace() {
     <JobBanner active={Object.values(jobs.active)} settled={jobs.settled} hidden={selected} onOpen={id=>setSelected(id)} onRead={id=>navigate('reader',id)} onDismiss={jobs.dismiss}/>
     {onboarding&&<ProviderPanel onboarding hasSample={hasSample} onGuide={()=>navigate('tutorial')} onClose={()=>void finishOnboarding()} onComplete={()=>{void finishOnboarding();openSample();}}/>}
     {removing&&<DeleteDialog item={removing} running={!!jobs.active[removing.id]} onClose={()=>setRemoving(null)} onDeleted={()=>{const id=removing.id;setRemoving(null);if(selected===id)setSelected(null);jobs.dismiss(id);void refresh();}}/>}
-    {appSettings&&<AppSettings onClose={()=>setAppSettings(false)}/>}
+    {appSettings&&<AppSettings initialUpdate={update??undefined} onClose={()=>setAppSettings(false)}/>}
     {settings&&<ProviderPanel onClose={()=>setSettings(false)}/>}
   </>;
 }

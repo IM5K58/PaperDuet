@@ -200,3 +200,32 @@
   .arxiv-import small { grid-column:auto; }
   .presentation-add { display:block; }
 }
+
+/* One-line update notice under the app bar. Closing it lasts until the next launch. */
+.update-banner { display:flex; align-items:center; gap:var(--s-sm); padding:var(--s-xs) var(--s-lg); background:var(--accent-soft); color:var(--ink); font-size:var(--t-body-sm); line-height:var(--lh-body-sm); border-bottom:1px solid color-mix(in srgb,var(--primary) 18%,transparent); }
+.update-banner>.icon { flex-shrink:0; color:var(--primary); }
+.update-banner>span { flex:1; min-width:0; }
+.update-banner-action { flex-shrink:0; color:var(--on-primary); background:var(--primary); border-color:var(--primary); }
+.update-banner-action:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
+.update-banner .update-banner-close { flex-shrink:0; color:var(--text-muted); background:transparent; border-color:transparent; }
+.update-banner .update-banner-close:hover { color:var(--ink); background:color-mix(in srgb,var(--primary) 10%,transparent); }
+
+/* 앱 설정 > 정보: release notes, creator, terms, bug reports */
+.about-links { list-style:none; padding:0; margin:0; border:1px solid var(--hairline); border-radius:var(--r-md); overflow:hidden; }
+.about-links li + li { border-top:1px solid var(--hairline-soft); }
+.about-links button { display:flex; align-items:center; gap:var(--s-sm); width:100%; min-height:56px; padding:var(--s-sm) var(--s-md); border:0; border-radius:0; text-align:left; background:var(--canvas); font-weight:var(--w-text); }
+.about-links button:hover { background:var(--canvas-soft); }
+.about-links button>span:first-child { flex:1; display:grid; gap:2px; }
+.about-links b { color:var(--ink); font-weight:var(--w-strong); }
+.dialog-content .about-links small { color:var(--text-muted); }
+.about-links .icon,.about-external { flex-shrink:0; color:var(--text-muted); }
+.creator { text-align:center; }
+.creator-photo { display:block; width:96px; height:96px; margin:var(--s-md) auto 0; border-radius:var(--r-full); object-fit:cover; background:#fff; box-shadow:0 0 0 1px var(--hairline),0 6px 18px rgba(0,0,0,.12); }
+.dialog-content.creator h3 { margin:var(--s-md) 0 var(--s-xxs); }
+.creator-role { margin:0; color:var(--text-muted); }
+.creator-actions { justify-content:center; }
+.creator-note { color:var(--text-muted); }
+.terms h4 { margin:var(--s-lg) 0 var(--s-xs); font-size:var(--t-body-sm); color:var(--ink); }
+.terms ol { margin:0; padding-left:1.4em; display:grid; gap:var(--s-xxs); }
+.terms p,.terms li { color:var(--ink-soft); }
+.terms-date { color:var(--text-muted); }
