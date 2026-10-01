@@ -43,7 +43,7 @@ export function Workspace() {
   const initial=new URLSearchParams(location.search);
   const [screen,setScreen]=useState(initial.has('tutorial')?'tutorial':initial.has('doc')?'reader':'library');
   const [tutorialScene,setTutorialScene]=useState(initial.get('tutorial')||lastTutorialScene());
-  const [docId,setDocId]=useState(initial.get('doc')||'rex-omni');
+  const [docId,setDocId]=useState(initial.get('doc')||'');
   const [items,setItems]=useState<LibraryItem[]>([]);
   const [selected,setSelected]=useState<string|null>(null);
   const [removing,setRemoving]=useState<LibraryItem|null>(null);
@@ -78,17 +78,15 @@ export function Workspace() {
     history.pushState(null,'',view==='tutorial'?`?tutorial=${guide}`:view==='library'?'?library=1':`?doc=${encodeURIComponent(id)}`);
     window.scrollTo(0,0);
   };
-  const hasSample=items.some(item=>item.id==='rex-omni');
   // Until the user adds a paper the page leads with import; afterwards it leads with the list.
   const firstRun=!items.some(item=>item.status!=='fixture');
   const recent=items.find(item=>item.opened_at&&item.block_count>0);
   const arxiv=<ArxivInput onImported={id=>{setSelected(id);setPage(1);void refresh();}}/>;
   const tutorialLink=<button className="library-tutorial-link" onClick={()=>navigate('tutorial')}><b>?</b><span><strong>처음이라면, 사용 가이드부터</strong><small>AI 연결부터 번역·질문·발표 준비까지 10개 설명으로 알아보세요.</small></span><Icon name="arrowRight"/></button>;
-  const openSample=()=>hasSample?navigate('reader','rex-omni'):navigate('library');
   const [loading,setLoading]=useState(true);
   // Right after launch the sidecar may still be booting, so the first load retries quietly.
   const refresh=async(retries=0,alive=()=>true)=>{for(let attempt=0;alive();attempt++){try{const list=await request<LibraryItem[]>('/documents');if(alive()){setItems(list);setError(e=>e===LOAD_ERROR?'':e);setLoading(false);}return;}catch{if(attempt>=retries){if(alive()){setError(LOAD_ERROR);setLoading(false);}return;}await new Promise(resolve=>setTimeout(resolve,500));}}};
-  useEffect(()=>{const pop=()=>{const p=new URLSearchParams(location.search);setScreen(p.has('tutorial')?'tutorial':p.has('doc')?'reader':'library');setTutorialScene(p.get('tutorial')||lastTutorialScene());setDocId(p.get('doc')||'rex-omni');};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
+  useEffect(()=>{const pop=()=>{const p=new URLSearchParams(location.search);setScreen(p.has('tutorial')?'tutorial':p.has('doc')?'reader':'library');setTutorialScene(p.get('tutorial')||lastTutorialScene());setDocId(p.get('doc')||'');};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
   useEffect(()=>{if(screen==='reader')return;let alive=true;void refresh(120,()=>alive);return()=>{alive=false;};},[screen]);
   const upload=async(file?:File)=>{
     if(!file||uploadLock.current)return;
@@ -98,7 +96,7 @@ export function Workspace() {
     try{const result=await request<{doc_id:string}>('/documents',{method:'POST',body:file,headers:{'Content-Type':'application/pdf'}});setSelected(result.doc_id);setPage(1);await refresh();}
     catch(e){setError((e as Error).message);}finally{uploadLock.current=false;setUploading(false);if(input.current)input.current.value='';}
   };
-  return <>{screen==='tutorial'?<Tutorial sceneId={tutorialScene} hasSample={hasSample} onScene={id=>{setTutorialScene(id);history.pushState(null,'',`?tutorial=${id}`);}} onGo={target=>{if(target==='connection')setSettings(true);else if(target==='settings')setAppSettings(true);else if(target==='sample')openSample();else navigate('library');}}/>:screen==='reader'?<Reader key={docId} docId={docId} onLibrary={()=>navigate('library')} onTutorial={()=>navigate('tutorial')} onProcess={()=>{setSelected(docId);navigate('library');}}/>:
+  return <>{screen==='tutorial'?<Tutorial sceneId={tutorialScene} onScene={id=>{setTutorialScene(id);history.pushState(null,'',`?tutorial=${id}`);}} onGo={target=>{if(target==='connection')setSettings(true);else if(target==='settings')setAppSettings(true);else navigate('library');}}/>:screen==='reader'?<Reader key={docId} docId={docId} onLibrary={()=>navigate('library')} onTutorial={()=>navigate('tutorial')} onProcess={()=>{setSelected(docId);navigate('library');}}/>:
     <div className={`library-page ${drag?'dragging':''}`} onDragOver={e=>{if(!e.dataTransfer.types.includes('Files'))return;e.preventDefault();setDrag(true);}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node|null))setDrag(false);}} onDrop={e=>{e.preventDefault();setDrag(false);void upload(e.dataTransfer.files[0]);}}>
       <header className="topbar library-bar"><div className="toolbar"><a className="brand" href="?library=1" onClick={e=>e.preventDefault()}><BrandMark/><b>PaperDuet</b></a>
         <div className="appbar-actions"><button onClick={()=>navigate('tutorial')}>사용 가이드</button><button onClick={()=>setSettings(true)}>AI 연결 설정</button><button onClick={()=>setAppSettings(true)}>{updateAvailable?'새 업데이트 · 앱 설정':'앱 설정'}</button>
@@ -121,7 +119,7 @@ export function Workspace() {
       <p className="library-footnote">번역 언어는 한국어입니다. 참고문헌은 원문을 유지합니다.</p></main></div>}
     {selected&&<ProgressPanel docId={selected} onClose={()=>{setSelected(null);jobs.wake();void refresh();}} onRead={()=>{const id=selected;setSelected(null);navigate('reader',id);}} onSettings={()=>setSettings(true)}/>}
     <JobBanner active={Object.values(jobs.active)} settled={jobs.settled} hidden={selected} onOpen={id=>setSelected(id)} onRead={id=>navigate('reader',id)} onDismiss={jobs.dismiss}/>
-    {onboarding&&<ProviderPanel onboarding hasSample={hasSample} onGuide={()=>navigate('tutorial')} onClose={()=>void finishOnboarding()} onComplete={()=>{void finishOnboarding();openSample();}}/>}
+    {onboarding&&<ProviderPanel onboarding onGuide={()=>navigate('tutorial')} onClose={()=>void finishOnboarding()} onComplete={()=>{void finishOnboarding();navigate('library');}}/>}
     {removing&&<DeleteDialog item={removing} running={!!jobs.active[removing.id]} onClose={()=>setRemoving(null)} onDeleted={()=>{const id=removing.id;setRemoving(null);if(selected===id)setSelected(null);jobs.dismiss(id);void refresh();}}/>}
     {appSettings&&<AppSettings initialUpdate={update??undefined} onClose={()=>setAppSettings(false)}/>}
     {settings&&<ProviderPanel onClose={()=>setSettings(false)}/>}

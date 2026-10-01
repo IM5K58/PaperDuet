@@ -11,7 +11,8 @@ node scripts/build-export.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Export reader build failed.' }
 # The sample paper is kept out of the public repository; bundle it only when present locally.
 $sampleFixture = Join-Path $projectRoot 'fixtures\rex-omni.blocks.json'
-$sampleData = if (Test-Path -LiteralPath $sampleFixture) { @('--add-data', "$sampleFixture;fixtures") } else { @() }
+# The Rex-Omni sample is no longer shipped; the fixture stays a local test asset only.
+$sampleData = @()
 & $pythonExe -m PyInstaller --noconfirm --clean --onedir --console --name paperduet-backend --paths (Join-Path $projectRoot 'backend') --distpath src-tauri/resources/backend-build --workpath build/pyinstaller --specpath build @sampleData --add-data "$(Join-Path $projectRoot 'backend\paperduet\schema.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_2.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_3.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\prompts');paperduet/prompts" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_4.sql');paperduet" --add-data "$policyPath;paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_5.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_6.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_7.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\resources');resources" --hidden-import keyring.backends.Windows --hidden-import uvicorn.logging --hidden-import uvicorn.loops.asyncio --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.lifespan.on backend/entrypoint.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 $sourceDir = [IO.Path]::GetFullPath((Join-Path $projectRoot 'src-tauri\resources\backend-build\paperduet-backend'))

@@ -257,7 +257,7 @@ test('font, view, theme and reading position survive reload; system dark mode an
 
 test('M3: first launch connection-first onboarding can skip to offline reader',async({page})=>{
   await page.goto('/');const intro=page.getByRole('dialog',{name:'PaperDuet 시작하기'});
-  await expect(intro).toBeVisible();await expect(intro.getByRole('button',{name:'샘플 논문 열기'})).toBeDisabled();
+  await expect(intro).toBeVisible();await expect(intro.getByRole('button',{name:'서재에서 시작하기'})).toBeDisabled();
   await intro.getByLabel('연결 방식',{exact:true}).selectOption('cli');
   await expect(intro).toContainText('claude auth login');
   await intro.getByLabel('제공자',{exact:true}).selectOption('google');
@@ -408,6 +408,6 @@ test('Tutorial: library and reader entry points, browser history, real settings 
   await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();await page.screenshot({path:info.outputPath('tutorial-desktop.png')});
   await page.getByRole('button',{name:'다음 설명 →'}).click();await expect(page).toHaveURL(/tutorial=import/);await page.goBack();await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();
   await page.getByRole('navigation',{name:'가이드 설명'}).getByRole('button',{name:'10 저장·문제 해결'}).click();await page.getByRole('button',{name:'실제 앱 설정 열기 ↗'}).click();await expect(page.getByRole('dialog',{name:'앱 설정'})).toBeVisible();await page.keyboard.press('Escape');
-  await page.getByRole('button',{name:'샘플로 시작하기 →'}).click();await expect(page.locator('[data-block]')).toHaveCount(285);await page.getByRole('button',{name:'사용 가이드',exact:true}).click();await expect(page.getByRole('heading',{name:'계속 사용할 준비가 됐어요.'})).toBeVisible();
+  await page.getByRole('button',{name:'서재로 시작하기 →'}).click();await expect(page.getByRole('heading',{name:'나의 논문 서재'})).toBeVisible();await page.getByRole('button',{name:'사용 가이드',exact:true}).click();await expect(page.getByRole('heading',{name:'계속 사용할 준비가 됐어요.'})).toBeVisible();
   await page.getByRole('button',{name:'서재로',exact:true}).click();await expect(page.getByRole('heading',{name:'나의 논문 서재'})).toBeVisible();
 });

@@ -64,7 +64,7 @@ CLI를 찾지 못하면 앱 설정에서 실행 파일 경로를 직접 지정�
 
 1. **논문 가져오기**: 서재 화면 어디에나 PDF를 끌어 놓거나 상단의 **+ 논문 추가**를 누릅니다. arXiv 논문은 서재의 arXiv 입력칸에 `2603.07952v1` 같은 ID나 URL을 넣고 **arXiv 가져오기**를 누릅니다.
 2. **처리 시작**: **처리 상태**에서 단계별 모델과 예상 사용량을 확인하고 처리 방식을 고른 뒤 **번역·주석 시작**을 누릅니다. 기본값인 **바로 처리**는 몇 분 안에 끝나고, **절약 모드**는 요금이 절반인 대신 제공자 사정에 따라 몇 시간까지 걸립니다. 처리 중에 창을 닫아도 백그라운드에서 계속되고 상단 알림으로 진행률을 보여 줍니다.
-3. **읽기**: 완료된 논문을 열어 대역으로 읽습니다. 서재 맨 위의 **이어 읽기**에서 마지막으로 읽던 논문을 바로 열 수 있습니다. 처음이라면 서재의 **사용 가이드**에서 10개 설명으로 기능을 둘러볼 수 있습니다. Releases의 설치 파일에는 번역·주석이 완성된 샘플 논문(Rex-Omni)이 들어 있습니다.
+3. **읽기**: 완료된 논문을 열어 대역으로 읽습니다. 서재 맨 위의 **이어 읽기**에서 마지막으로 읽던 논문을 바로 열 수 있습니다. 처음이라면 서재의 **사용 가이드**에서 10개 설명으로 기능을 둘러볼 수 있습니다.
 4. **검수**: "검수 필요" 표시가 붙은 블록은 원문과 비교해 직접 고치거나 다시 생성합니다.
 5. **정리**: 필요 없어진 논문은 서재 목록 오른쪽의 휴지통 아이콘으로 지웁니다. 원문 PDF, 번역, 주석, AI 대화, 발표 노트가 함께 지워지며 되돌릴 수 없습니다.
 6. **질문과 내보내기**: 문장을 선택하거나 문단 옆의 **질문** 버튼으로 AI에게 묻고, 논문 제목 아래의 **내보내기**로 HTML이나 Markdown 파일로 저장합니다.
@@ -150,7 +150,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-실제 유료 AI 호출은 자동 테스트에 포함되지 않습니다. 샘플 논문 데이터가 없는 클론에서는 샘플을 읽는 백엔드 테스트 10개와 E2E 테스트를 건너뜁니다.
+실제 유료 AI 호출은 자동 테스트에 포함되지 않습니다. 테스트용 샘플 데이터(`fixtures/rex-omni.blocks.json`)는 저장소에 포함하지 않으며, 이 파일이 없으면 이를 쓰는 백엔드·E2E 테스트는 자동으로 건너뜁니다.
 
 ### 구조
 
@@ -171,9 +171,3 @@ PaperDuet은 [GNU Affero General Public License v3.0](LICENSE)으로 배포합�
 
 - PDF 파싱: [PyMuPDF](https://pymupdf.readthedocs.io/) (AGPL-3.0)
 - 글꼴: Inter, IBM Plex Sans KR, Source Serif 4, Noto Serif KR (SIL Open Font License 1.1). 수식 렌더링: KaTeX (MIT)
-
-### 샘플 논문
-
-설치 파일의 샘플은 Qing Jiang, Junan Huo, Xingyu Chen, Yuda Xiong, Zhaoyang Zeng, Yihao Chen, Tianhe Ren, Junzhi Yu, Lei Zhang, "[Detect Anything via Next Point Prediction](https://arxiv.org/abs/2510.12798)" (arXiv:2510.12798, 2025)의 1–31쪽 본문을 한국어로 번역하고 주석을 단 것입니다. 원 논문은 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)으로 공개되어 있습니다.
-
-샘플 데이터(`fixtures/rex-omni.blocks.json`)는 이 소스 저장소에 포함하지 않습니다. 저장소에서 직접 빌드한 앱에는 샘플이 없고, 샘플이 필요한 테스트는 자동으로 건너뜁니다.

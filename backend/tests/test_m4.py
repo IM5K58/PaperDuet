@@ -137,7 +137,7 @@ def test_real_visualad_html_if_available():
     assert any(r'\(F_{1}\)' in c.text_en for b in blocks if b.table for row in b.table.body for c in row)
 
 
-def test_delete_document_removes_everything_and_a_deleted_sample_stays_gone(api,tmp_path):
+def test_delete_document_removes_everything(api,tmp_path):
     client,store,_=api
     events(client.post('/ask',json=body()))
     assert client.post('/documents/m2-paper/presentation',json={'title':'메모','body_md':'x'}).status_code<300
@@ -150,6 +150,10 @@ def test_delete_document_removes_everything_and_a_deleted_sample_stays_gone(api,
             assert not db.execute(f'SELECT 1 FROM {table} WHERE doc_id=?',('m2-paper',)).fetchone(),table
         assert not db.execute('SELECT 1 FROM messages').fetchone()
     assert client.delete('/documents/m2-paper').status_code==404
+
+@pytest.mark.sample
+def test_a_deleted_sample_stays_gone(api,tmp_path):
+    client,_,_=api
     assert client.delete('/documents/rex-omni').status_code==204
     assert Store(tmp_path,FIXTURE).document('rex-omni') is None  # not re-seeded on the next start
 
