@@ -141,7 +141,7 @@ try {
     const update=await window.__TAURI_INTERNALS__.invoke('update_status');
     return {html_status:response.status,html_bytes:new TextEncoder().encode(html).length,embedded_fonts:html.includes('data:font/'),offline_policy:html.includes("connect-src 'none'"),markdown_status:markdown.status,presentation_status:presentation.status,update};
   });
-  expect(m4.html_status).toBe(200);expect(m4.embedded_fonts).toBe(true);expect(m4.offline_policy).toBe(true);expect(m4.markdown_status).toBe(200);expect(m4.presentation_status).toBe(200);expect(m4.update.current_version).toBe('0.8.3');
+  expect(m4.html_status).toBe(200);expect(m4.embedded_fonts).toBe(true);expect(m4.offline_policy).toBe(true);expect(m4.markdown_status).toBe(200);expect(m4.presentation_status).toBe(200);expect(m4.update.current_version).toBe('0.8.4');
   tracked = descendants(app.pid);
   if (!tracked.some(p => p.Name === 'paperduet-backend.exe')) throw new Error('Bundled Python backend not running');
   if (tracked.some(p => /^(python|node)(\.exe)?$/i.test(p.Name))) throw new Error('App used external Python or Node');
