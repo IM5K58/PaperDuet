@@ -6,6 +6,7 @@ export const ERROR_TEXT: Record<string,string> = {
 
   AI_CONNECTION_REQUIRED: 'AI 연결 설정에서 API 키 또는 공식 CLI를 연결해 주세요.', AI_AUTH_FAILED: 'API 키를 확인해 주세요.',
   CLI_NOT_FOUND:'공식 CLI를 찾지 못했습니다. 설치하거나 실행 파일 경로를 지정해 주세요.', CLI_DISABLED:'이 빌드에서는 CLI 연결을 지원하지 않습니다.', CLI_UNSUPPORTED:'이 제공자는 API 키 연결만 지원합니다.', CLI_UPDATE_REQUIRED:'CLI 안전 실행 옵션이 부족합니다. 공식 CLI를 업데이트해 주세요.', CLI_REQUEST_FAILED:'CLI 요청이 실패했습니다. 공식 CLI에서 로그인 상태와 모델을 확인해 주세요.', CLI_ISOLATION_FAILED:'CLI 격리 프로세스를 만들지 못했습니다.', CLI_TIMEOUT:'CLI 응답 시간이 초과되었습니다.', AI_OUTPUT_LIMIT:'응답 길이 한도에 도달했습니다. 범위를 줄여 다시 질문해 주세요.', AI_STREAM_INTERRUPTED:'응답이 중단되었습니다. 다시 질문하거나 재생성해 주세요.', SELECTION_CHANGED:'선택한 텍스트가 달라졌습니다. 다시 선택해 주세요.', THREAD_BUSY:'이 대화에서 답변을 생성 중입니다.', CONTEXT_TOO_LARGE:'문맥이 너무 큽니다. 논문 전체 포함을 꺼 주세요.', ANSWER_TOO_LONG:'주석 길이 한도를 초과했습니다. 짧은 답변으로 다시 요청해 주세요.',
+  AI_OVERLOADED: 'AI 제공자 서버가 혼잡해 여러 번 다시 시도했지만 응답이 없었습니다. 잠시 후 이어서 실행해 주세요.', AI_MODEL_NOT_FOUND: '선택한 모델을 찾을 수 없습니다. AI 연결 설정에서 모델 이름을 확인해 주세요.',
   AI_RATE_LIMIT: '사용량 한도에 도달했습니다. 잠시 후 이어서 실행해 주세요.', AI_REQUEST_FAILED: 'AI 요청이 거부되었습니다. 모델과 API 사용 가능 여부를 확인해 주세요.',
   AI_NETWORK_ERROR: 'AI에 연결하지 못했습니다. 네트워크를 확인하고 재개해 주세요.', AI_INVALID_JSON: 'AI 응답 형식이 맞지 않습니다. 다시 시도해 주세요.',
   KEYRING_UNAVAILABLE: 'Windows 자격 증명 관리자에 접근하지 못했습니다.', INVALID_KEY_FORMAT: 'API 키 형식을 확인해 주세요.',

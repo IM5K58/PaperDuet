@@ -1,4 +1,5 @@
 """Common streaming adapters for pipeline and Ask; never execute model tools."""
+import asyncio
 import base64
 import json
 import re
@@ -110,6 +111,9 @@ class APIProvider(StructuredAdapter):
     def check(response):
         if response.status_code in (401,403): raise ProviderError('AI_AUTH_FAILED')
         if response.status_code == 429: raise ProviderError('AI_RATE_LIMIT')
+        if response.status_code == 404: raise ProviderError('AI_MODEL_NOT_FOUND')
+        # 5xx and Anthropic's 529: the provider is busy or down, not refusing the request.
+        if response.status_code >= 500: raise ProviderError('AI_OVERLOADED')
         if response.status_code >= 400: raise ProviderError('AI_REQUEST_FAILED')
 
     def client(self):
@@ -162,7 +166,23 @@ class APIProvider(StructuredAdapter):
         if effort and re.match(r'gemini-[3-9]',model): config['thinkingConfig']={'thinkingLevel':effort}
         return f'/v1beta/models/{model}:streamGenerateContent?alt=sse',{'systemInstruction':{'parts':[{'text':system}]},'contents':prepared,'generationConfig':config}
 
+    # Busy providers (Gemini "high demand", Anthropic "overloaded") usually recover in
+    # seconds. Retry only before the first chunk, so an answer is never sent twice.
+    RETRY_DELAYS=(2,5,10)
+
     async def stream(self, model, system, messages, image=None, effort=None):
+        for delay in (*self.RETRY_DELAYS,None):
+            started=False
+            try:
+                async for event in self.stream_once(model,system,messages,image,effort):
+                    started=True
+                    yield event
+                return
+            except ProviderError as error:
+                if str(error)!='AI_OVERLOADED' or started or delay is None: raise
+            await asyncio.sleep(delay)
+
+    async def stream_once(self, model, system, messages, image=None, effort=None):
         key=self.vault.get()
         if not key: raise ProviderError('AI_CONNECTION_REQUIRED')
         path,body=self.body(model,system,messages,image,effort)
@@ -176,7 +196,7 @@ class APIProvider(StructuredAdapter):
                         value=line[5:].strip()
                         if value=='[DONE]': continue
                         data=json.loads(value);kind=data.get('type');delta=''
-                        if kind=='error' or data.get('error'): raise ProviderError('AI_REQUEST_FAILED',usage=usage)
+                        if kind=='error' or data.get('error'): raise ProviderError('AI_OVERLOADED' if 'overloaded' in json.dumps(data.get('error')).lower() else 'AI_REQUEST_FAILED',usage=usage)
                         if self.id=='anthropic':
                             if kind=='content_block_delta' and data.get('delta',{}).get('type')=='text_delta': delta=data['delta']['text']
                             if kind=='message_start':

@@ -322,3 +322,18 @@ def test_visualad_regression_if_available(tmp_path):
     assert all(not overlap(s['bbox'],first['region']) for b,s in zip(blocks,sources) if b.page==1 and b.type=='p')
     for b,s in zip(blocks,sources):
         if b.type=='eq':assert s['region'][2]-s['region'][0]<300  # Never span both columns.
+
+def test_busy_provider_is_retried_before_the_first_chunk_and_reported_as_busy():
+    # Gemini answers 503 "high demand" under load; that is not a rejected request.
+    answer='data: '+json.dumps({'candidates':[{'content':{'parts':[{'text':'{"ok": 1}'}]},'finishReason':'STOP'}],'usageMetadata':{'promptTokenCount':3,'candidatesTokenCount':2}})+'\n\n'
+    calls=[]
+    def recovering(request):
+        calls.append(request);return httpx.Response(503) if len(calls)<3 else httpx.Response(200,text=answer)
+    def provider(handler):
+        p=APIProvider('google',Vault('test-key-secret-value'),httpx.MockTransport(handler));p.RETRY_DELAYS=(0,0,0);return p
+    value,usage=asyncio.run(provider(recovering).json('translate','gemini-3.8-flash',{'blocks':[]}))
+    assert value=={'ok':1} and len(calls)==3 and usage['tokens_in']==3
+    with pytest.raises(ProviderError,match='AI_OVERLOADED'):
+        asyncio.run(provider(lambda r:httpx.Response(503)).json('translate','gemini-3.8-flash',{}))
+    with pytest.raises(ProviderError,match='AI_MODEL_NOT_FOUND'):
+        asyncio.run(provider(lambda r:httpx.Response(404)).json('translate','gemini-9-nope',{}))
