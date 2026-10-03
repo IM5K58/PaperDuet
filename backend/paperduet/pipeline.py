@@ -95,6 +95,7 @@ def atomic_json(path: Path, data):
 BUSY = {'queued', 'running', 'batch_waiting'}
 # Answers a work unit handles itself; every other provider error pauses the job.
 SOFT = {'AI_INVALID_JSON', 'AI_OUTPUT_LIMIT'}
+PARSER_REVISION = 3  # 2: pages-v2 extraction; 3: paragraphs rejoined across breaks
 MISSING = object()
 
 
@@ -166,13 +167,15 @@ class Pipeline:
         with self.store.connect() as db:
             # Upgrade untouched extraction previews only. Translations, notes and
             # conversations retain their stable IDs and are never overwritten.
-            for row in db.execute('SELECT doc_id,checkpoint FROM jobs').fetchall():
+            # Revision 3 rejoins paragraphs cut by page/column breaks, figures and tables;
+            # the cached page extraction is reused. arXiv HTML imports are not PDF-parsed.
+            for row in db.execute("SELECT j.doc_id,j.checkpoint FROM jobs j JOIN documents d ON d.id=j.doc_id WHERE d.source_kind='pdf'").fetchall():
                 checkpoint=json.loads(row['checkpoint'] or '{}')
-                if checkpoint.get('parser_revision',1)>=2 or checkpoint.get('ai_approved'):continue
+                if checkpoint.get('parser_revision',1)>=PARSER_REVISION or checkpoint.get('ai_approved') or checkpoint.get('source_kind','pdf')!='pdf':continue
                 payloads=[json.loads(r[0]) for r in db.execute('SELECT payload FROM blocks WHERE doc_id=?',(row['doc_id'],))]
                 edited=any(b.get('ko') or b.get('caption_ko') or b.get('note') for b in payloads)
                 if edited or db.execute('SELECT 1 FROM threads WHERE doc_id=?',(row['doc_id'],)).fetchone() or db.execute('SELECT 1 FROM presentation_notes WHERE doc_id=?',(row['doc_id'],)).fetchone():continue
-                checkpoint.update(parser_revision=2,reextract=True,completed_stages=['Ingest'],extracted_pages=0,translated=[],restored=[])
+                checkpoint.update(parser_revision=PARSER_REVISION,reextract=True,completed_stages=['Ingest'],extracted_pages=0,translated=[],restored=[])
                 db.execute("UPDATE jobs SET status='queued',stage='Extract',progress=0,checkpoint=? WHERE doc_id=?",(json.dumps(checkpoint),row['doc_id']))
             ids=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('queued','running','batch_waiting')")]
             finished=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('review','complete')")]
@@ -233,7 +236,7 @@ class Pipeline:
             directory.mkdir(parents=True,exist_ok=True)
             os.replace(temp,directory/'source.pdf')
             atomic_json(directory/'metadata.json',metadata)
-            checkpoint={'ai_approved':False,'parser_revision':2,'options':self.store.pipeline_options().model_dump(),'completed_stages':['Ingest'],'extracted_pages':0,'translated':[],'restored':[],'error':None}
+            checkpoint={'ai_approved':False,'parser_revision':PARSER_REVISION,'options':self.store.pipeline_options().model_dump(),'completed_stages':['Ingest'],'extracted_pages':0,'translated':[],'restored':[],'error':None}
             with self.store.connect() as db:
                 db.execute('INSERT INTO documents(id,title,arxiv_id,file_hash,source_path,status,page_count,authors) VALUES(?,?,?,?,?,?,?,?)',
                     (doc_id,metadata['title'],metadata['arxiv_id'],file_hash,f'documents/{doc_id}/source.pdf','queued',metadata['page_count'],metadata['authors']))

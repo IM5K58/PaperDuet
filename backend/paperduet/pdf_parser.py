@@ -72,6 +72,92 @@ def inline_lines(lines):
     return " ".join(parts)
 
 
+SENTENCE_END = re.compile(r"[.!?:][\"'”’)\]]*$")
+FOOTNOTE = re.compile(r"^(?:[*†‡§¶]|\d{1,2}(?=https?:|[A-Z][a-z]))")  # "* Corresponding", "1https://…", "2We use"
+LINE_HYPHEN = re.compile(r"([A-Za-z]+)-(</[bi]>)? (<[bi]>)?([a-z][A-Za-z]*)")  # styled lines: "to-</i> <i>kens"
+# Second halves that usually belong to a hyphenated compound ("language-free").
+COMPOUND = {"based", "free", "level", "wise", "aware", "shot", "specific", "like", "scale", "order", "driven",
+            "grained", "trained", "art", "time", "end", "style", "agnostic", "independent", "dependent",
+            "dimensional", "invariant", "oriented", "guided", "supervised", "related", "class", "domain", "world", "centric"}
+# First halves that do the same ("multi-granularity", "cross-layer").
+PREFIX = {"cross", "multi", "inter", "intra", "non", "self", "semi", "post", "anti", "cold", "fine", "coarse", "zero",
+          "few", "one", "two", "three", "single", "dual", "open", "long", "short", "low", "high", "real", "end"}
+
+
+def plain_text(value):
+    return html.unescape(re.sub(r"<[^>]+>", "", value or "")).strip()
+
+
+def dehyphenate(text, vocabulary):
+    """Rejoin words split at a line end ("ap- plying"), keeping real compounds
+    ("zero-shot") and suspended hyphens ("pre- and post-training")."""
+    def fix(match):
+        left, close, open_, right = match[1], match[2] or "", match[3] or "", match[4]
+        if right in {"and", "or", "to", "nor", "vs"}:
+            return match[0]
+        # Both halves in the same style become one styled word.
+        tags = "" if close[2:] == open_[1:] else close + open_
+        joined, compound = (left + right).lower(), f"{left}-{right}".lower()
+        # With no evidence either way, two halves that are words of their own
+        # ("human-centric") form a compound; "detec-tion" does not.
+        whole = len(left) > 3 and vocabulary[left.lower()] and vocabulary[right]  # not "AP" in "ap-plying"
+        if vocabulary[compound] > vocabulary[joined] or (not vocabulary[joined] and (whole or right in COMPOUND or left.lower() in PREFIX or not left[1:].islower())):
+            return f"{left}-{tags}{right}"
+        return left + tags + right
+    return LINE_HYPHEN.sub(fix, text)
+
+
+def continues(before, after):
+    """Does `after` carry on the sentence `before` left unfinished?"""
+    left, right = plain_text(before.get("en")), plain_text(after.get("en"))
+    if not left or not right or SENTENCE_END.search(left) or right.startswith(("•", "– ")):
+        return False
+    first = right.lstrip("([“\"'")[:1]
+    return left.endswith((",", ";", "-")) or first.islower() or (first.isdigit() and left[-1].islower())
+
+
+def rejoin_paragraphs(items):
+    """A paragraph cut by a column or page break, or by a figure, table or footnote
+    placed inside it, arrives as several items. Rejoin them so it is read and
+    translated as one paragraph; the merged item keeps the first part's position."""
+    items = [dict(i) for i in items]
+    regions = {}
+    for item in items:
+        if item["type"] in {"fig", "tab"}:
+            # Artwork plus caption: panel labels can lie outside the cropped region.
+            regions.setdefault(item["page"], []).append(item["bbox"])
+    # Words as the paper spells them; the broken halves themselves are left out.
+    vocabulary = Counter(w.lower() for item in items for w in re.findall(r"[A-Za-z]+(?:-[A-Za-z]+)*",
+                         re.sub(r"[A-Za-z]+- [a-z][A-Za-z]*", " ", plain_text(item.get("en")))))
+    result, open_, references = [], None, False  # open_: index of a paragraph that may go on
+    for item in items:
+        kind = item["type"]
+        if kind in {"sec", "sub", "ssub"}:
+            references = (item.get("n") or "").lower() in {"references", "bibliography"}
+        if references:  # Reference entries are kept as extracted and never translated.
+            result.append(item)
+            open_ = None
+            continue
+        # Figures, tables, footnotes and stray labels inside artwork sit beside the text flow.
+        text = plain_text(item.get("en"))
+        aside = kind in {"fig", "tab"} or (kind == "p" and ((bool(FOOTNOTE.match(text)) and len(text) < 300)
+                 or any(overlap(item["bbox"], r) for r in regions.get(item["page"], []))))
+        if aside:
+            result.append(item)
+            continue
+        current = result[open_] if open_ is not None else None
+        if current and kind == "p" and item["page"] - current["page"] <= 1 and continues(current, item):
+            current["en"] = current["en"].rstrip() + " " + item["en"].lstrip()
+            continue
+        result.append(item)
+        open_ = len(result) - 1 if kind in {"p", "li"} else None
+    for item in result:
+        key = "en" if item["type"] in {"p", "li"} else "caption_en"
+        if item.get(key):
+            item[key] = dehyphenate(item[key], vocabulary)
+    return result
+
+
 def coordinates(values, tolerance=1.5):
     groups = []
     for value in sorted(values):
@@ -417,20 +503,19 @@ class PyMuPDFParser:
     def structure(self, doc_id: str, pages: list[list[dict]], metadata: dict):
         blocks,sources,path=[],[],[]
         references=False
-        for page_items in pages:
-            for item in page_items:
-                if item["type"] in {"sec","sub","ssub"}:
-                    depth={"sec":0,"sub":1,"ssub":2}[item["type"]]
-                    path=path[:depth]+[item["n"] or ""]
-                    references=(item["n"] or "").lower() in {"references","bibliography"}
-                public={k:v for k,v in item.items() if k in {"type","n","en","page","caption_en","table","latex"} and v is not None}
-                b=Block(id=f"b{len(blocks):04d}",doc_id=doc_id,order=len(blocks),section_path=path.copy(),**public)
-                if item.get("crop"):
-                    b.image_path=f"documents/{doc_id}/crops/{item['crop']}"
-                if b.type=='tab' and not b.table:
-                    b.qa_flags=['EXTRACT_REVIEW']
-                blocks.append(b)
-                sources.append({"bbox":item["bbox"],"region":item.get("region"),"references":references,"needs_restore":item.get("needs_restore",False),"inferred_heading":item.get('inferred_heading',False)})
+        for item in rejoin_paragraphs([i for page in pages for i in page]):
+            if item["type"] in {"sec","sub","ssub"}:
+                depth={"sec":0,"sub":1,"ssub":2}[item["type"]]
+                path=path[:depth]+[item["n"] or ""]
+                references=(item["n"] or "").lower() in {"references","bibliography"}
+            public={k:v for k,v in item.items() if k in {"type","n","en","page","caption_en","table","latex"} and v is not None}
+            b=Block(id=f"b{len(blocks):04d}",doc_id=doc_id,order=len(blocks),section_path=path.copy(),**public)
+            if item.get("crop"):
+                b.image_path=f"documents/{doc_id}/crops/{item['crop']}"
+            if b.type=='tab' and not b.table:
+                b.qa_flags=['EXTRACT_REVIEW']
+            blocks.append(b)
+            sources.append({"bbox":item["bbox"],"region":item.get("region"),"references":references,"needs_restore":item.get("needs_restore",False),"inferred_heading":item.get('inferred_heading',False)})
         # An unlabelled abstract is located by its first-page enclosing box.
         # Its inferred heading carries provenance and uses that paragraph's bbox.
         # Text is never substituted with fixture content.

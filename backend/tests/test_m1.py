@@ -98,6 +98,35 @@ def test_two_columns_metadata_footnotes_and_stable_ids(tmp_path):
     assert all('bbox' in source for source in sources)
 
 
+def test_paragraphs_cut_by_breaks_figures_and_footnotes_are_rejoined():
+    from paperduet.pdf_parser import rejoin_paragraphs
+    p=lambda page,text,bbox=(50,600,290,700),**extra:{'type':'p','en':text,'bbox':list(bbox),'page':page,**extra}
+    items=[p(1,'Anomaly detection plays a role in domains such as industrial inspection'),
+           p(1,'* Corresponding author.',(70,705,150,713)),
+           {'type':'fig','n':'Figure 1','caption_en':'Overview of the self- attention path.','bbox':[310,280,550,660],'region':[310,280,550,640],'page':1},
+           p(1,'and medical diagnosis. It flags devi- ations at the image or pixel',(310,690,550,713)),
+           p(2,'level, from <i>to-</i> <i>kens</i> to zero- shot and pre- and post-training.',(50,70,290,270)),
+           p(2,'The objective differs.',(50,280,290,300)),
+           p(3,'(3) After SAF',(400,225,440,234)),
+           {'type':'fig','n':'Figure 2','bbox':[50,80,550,290],'region':[50,80,550,260],'page':3},
+           p(3,'we compare encodings, and',(50,600,290,700)),
+           {'type':'sec','n':'5','en':'Conclusion','bbox':[310,60,400,70],'page':3},
+           p(3,'which starts lowercase but follows a heading.',(310,80,550,200)),
+           p(4,'We conclude.',(50,70,290,90)),p(4,'zero-shot appears again',(50,100,290,120)),
+           {'type':'sec','n':'References','en':'References','bbox':[50,130,200,140],'page':4},
+           p(4,'[1] A. Author. Visual anomaly segmenta-',(50,150,290,170)),p(4,'tion, 2023.',(310,150,550,170))]
+    out=rejoin_paragraphs(items)
+    texts=[i.get('en') for i in out if i['type']=='p']
+    # Footnote, figure and the next page are skipped over; the line-end hyphen is rejoined.
+    assert texts[0]=='Anomaly detection plays a role in domains such as industrial inspection and medical diagnosis. '\
+        'It flags deviations at the image or pixel level, from <i>tokens</i> to zero-shot and pre- and post-training.'
+    assert out[0]['page']==1 and out[0]['bbox']==items[0]['bbox']
+    assert texts[1:4]==['* Corresponding author.','The objective differs.','(3) After SAF']  # label inside the figure stays apart
+    assert 'we compare encodings, and' in texts and 'which starts lowercase but follows a heading.' in texts  # never across headings
+    assert texts[-2:]==['[1] A. Author. Visual anomaly segmenta-','tion, 2023.']  # references are left as extracted
+    assert next(i for i in out if i.get('n')=='Figure 1')['caption_en']=='Overview of the self-attention path.'
+
+
 def test_offline_ingest_sse_duplicate_resume_translation_and_persistence(tmp_path):
     data=tmp_path/'사용자 폴더 한글'
     app,client,vault,provider=client_app(data)
