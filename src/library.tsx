@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as Reader } from './reader';
-import { Tutorial, lastTutorialScene } from './tutorial';
+import { SCENES, Tutorial, lastTutorialScene } from './tutorial';
 import { AppSettings, ArxivInput, type UpdateInfo } from './m4';
 import { invoke } from '@tauri-apps/api/core';
 import { ERROR_TEXT, authorizedFetch, request } from './api';
@@ -82,7 +82,7 @@ export function Workspace() {
   const firstRun=!items.some(item=>item.status!=='fixture');
   const recent=items.find(item=>item.opened_at&&item.block_count>0);
   const arxiv=<ArxivInput onImported={id=>{setSelected(id);setPage(1);void refresh();}}/>;
-  const tutorialLink=<button className="library-tutorial-link" onClick={()=>navigate('tutorial')}><b>?</b><span><strong>처음이라면, 사용 가이드부터</strong><small>AI 연결부터 번역·질문·발표 준비까지 10개 설명으로 알아보세요.</small></span><Icon name="arrowRight"/></button>;
+  const tutorialLink=<button className="library-tutorial-link" onClick={()=>navigate('tutorial')}><b>?</b><span><strong>처음이라면, 사용 가이드부터</strong><small>AI 연결부터 번역·질문·요약·발표 준비까지 {SCENES.length}개 설명으로 알아보세요.</small></span><Icon name="arrowRight"/></button>;
   const [loading,setLoading]=useState(true);
   // Right after launch the sidecar may still be booting, so the first load retries quietly.
   const refresh=async(retries=0,alive=()=>true)=>{for(let attempt=0;alive();attempt++){try{const list=await request<LibraryItem[]>('/documents');if(alive()){setItems(list);setError(e=>e===LOAD_ERROR?'':e);setLoading(false);}return;}catch{if(attempt>=retries){if(alive()){setError(LOAD_ERROR);setLoading(false);}return;}await new Promise(resolve=>setTimeout(resolve,500));}}};

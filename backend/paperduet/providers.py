@@ -52,7 +52,8 @@ def image_content(image):
 
 # Reasoning depth per pipeline stage. Mechanical stages stay shallow; only
 # annotation benefits from deeper thinking. Ask AI keeps the model default.
-STAGE_EFFORT = {'glossary': 'low', 'translate': 'low', 'table': 'low', 'equation': 'low', 'annotate': 'medium'}
+STAGE_EFFORT = {'glossary': 'low', 'translate': 'low', 'table': 'low', 'equation': 'low', 'annotate': 'medium',
+                'summary_section': 'low', 'summary_paper': 'medium'}
 ANTHROPIC_EFFORT = re.compile(r'claude-(opus-(4-[5-9]|5)|sonnet-(4-6|5)|fable|mythos)')
 OPENAI_REASONING = re.compile(r'(gpt-5|gpt-6|o\d)')
 

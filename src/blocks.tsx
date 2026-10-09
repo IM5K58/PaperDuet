@@ -6,7 +6,7 @@ import type { Block, Cell, NoteKind } from './types';
 import { request } from './api';
 import { Icon } from './icons';
 
-function Crop({block}:{block:Block}) {
+export function Crop({block}:{block:Block}) {
   const [url,setUrl]=useState('');const [error,setError]=useState(false);const ref=useRef<HTMLDivElement>(null);
   const [expanded,setExpanded]=useState(false);
   useEffect(()=>{let stopped=false;const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();void request<{data_url:string}>(`/documents/${block.doc_id}/blocks/${block.id}/image`).then(data=>{if(!stopped)setUrl(data.data_url);}).catch(()=>{if(!stopped)setError(true);});}},{rootMargin:'400px'});if(ref.current)observer.observe(ref.current);return()=>{stopped=true;observer.disconnect();};},[block.doc_id,block.id]);

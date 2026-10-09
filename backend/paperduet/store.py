@@ -16,7 +16,7 @@ class Store:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 7:
+            if version > 8:
                 raise RuntimeError("Database version is newer than this app")
             if version == 0:
                 db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
@@ -32,6 +32,8 @@ class Store:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_6.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             if version < 7:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_7.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
+            if version < 8:
+                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_8.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             # The sample paper is optional: it is not published with the source,
             # and a user who deleted it does not get it back on the next start.
             if fixture.is_file() and not db.execute("SELECT 1 FROM documents WHERE id='rex-omni'").fetchone() \
@@ -123,6 +125,29 @@ class Store:
             # A PDF page still open elsewhere may hold a file; leftovers are harmless.
             shutil.rmtree(directory, ignore_errors=True)
         return True
+
+    def summary(self, doc_id: str):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM paper_summaries WHERE doc_id=?", (doc_id,)).fetchone()
+            if not row:
+                return None
+            result = dict(row)
+            result["payload"] = json.loads(row["payload"]) if row["payload"] else None
+            result["edited"] = bool(row["edited"])
+            return result
+
+    def save_summary(self, doc_id: str, **fields):
+        """Create or update a paper's summary row; `payload` is stored as JSON."""
+        if "payload" in fields and fields["payload"] is not None:
+            fields["payload"] = json.dumps(fields["payload"], ensure_ascii=False)
+        if "edited" in fields:
+            fields["edited"] = int(bool(fields["edited"]))
+        names = list(fields)
+        with self.connect() as db:
+            db.execute("INSERT INTO paper_summaries(doc_id,status) VALUES(?, 'running') ON CONFLICT(doc_id) DO NOTHING", (doc_id,))
+            if names:
+                db.execute(f"UPDATE paper_summaries SET {','.join(n + '=?' for n in names)},updated_at=CURRENT_TIMESTAMP WHERE doc_id=?",
+                           [fields[n] for n in names] + [doc_id])
 
     def ai_result(self, doc_id: str, key: str):
         with self.connect() as db:

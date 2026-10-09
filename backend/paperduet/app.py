@@ -365,4 +365,6 @@ def create_app(token: str, data_dir: Path, fixture: Path,
 
     from .m4 import register
     register(app,store,pipeline,ask,registry)
+    from .summary import register as register_summary
+    register_summary(app,store,pipeline)
     return app

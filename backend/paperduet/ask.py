@@ -44,7 +44,8 @@ class AskSettings(Model):
 
 class Anchor(Model):
     block_id: str=Field(min_length=1,max_length=120)
-    field: Literal['en','ko','caption_en','caption_ko','latex','note','card']='en'
+    # 'summary': a point of the paper summary, asked about at its first evidence block.
+    field: Literal['en','ko','caption_en','caption_ko','latex','note','card','summary']='en'
     start: int=Field(default=0,ge=0)
     end: int=Field(default=0,ge=0)
     text: str=Field(default='',max_length=30000)
@@ -96,7 +97,7 @@ def build_context(store,request,settings):
     blocks=doc.blocks;by_id={b.id:b for b in blocks};block=by_id.get(request.anchor.block_id)
     if not block: raise ValueError('ANCHOR_NOT_FOUND')
     anchor=request.anchor
-    if anchor.text:
+    if anchor.text and anchor.field!='summary':  # a summary point is quoted whole, not a range of the block
         content=block.note.body_md if anchor.field=='note' and block.note else block.card.body if anchor.field=='card' and block.card else getattr(block,anchor.field,'')
         try: exact=utf16_slice(plain(content),anchor.start,anchor.end)
         except UnicodeError: raise ValueError('SELECTION_CHANGED') from None

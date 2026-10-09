@@ -28,7 +28,7 @@ def register(app,store,pipeline,ask,registry):
         if not doc:raise HTTPException(404,'DOCUMENT_NOT_FOUND')
         return doc
     def busy():
-        return bool(ask.active or pipeline.work_lock.locked() or importer.lock.locked() or any(not t.done() for t in pipeline.tasks.values()))
+        return bool(ask.active or pipeline.work_lock.locked() or importer.lock.locked() or any(not t.done() for t in [*pipeline.tasks.values(),*pipeline.summary_tasks.values()]))
 
     @app.post('/documents/arxiv',status_code=202)
     async def import_arxiv(value:ArxivInput):

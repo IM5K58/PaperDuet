@@ -140,6 +140,7 @@ class Pipeline:
         self.store,self.provider=store,provider
         self.parser=parser or PyMuPDFParser()
         self.tasks={}
+        self.summary_tasks={}  # paper summaries (summary.Summarizer), made on request
         self.closing=False
         self.work_lock=asyncio.Lock()
         # Batch polling: first wait, longest wait, and the wait while cancelling (s).
@@ -152,10 +153,11 @@ class Pipeline:
 
     async def discard(self,doc_id):
         """Stop a paper's processing before it is deleted so nothing writes it back."""
-        task=self.tasks.pop(doc_id,None)
-        if task and not task.done():
-            task.cancel()
-            await asyncio.gather(task,return_exceptions=True)
+        for tasks in (self.tasks,self.summary_tasks):
+            task=tasks.pop(doc_id,None)
+            if task and not task.done():
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
         job=self.store.job(doc_id)
         pending=job and job['checkpoint'].get('pending_batch')
         if pending:
@@ -200,7 +202,7 @@ class Pipeline:
 
     async def close(self):
         self.closing=True
-        tasks=list(self.tasks.values())
+        tasks=list(self.tasks.values())+list(self.summary_tasks.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks,return_exceptions=True)

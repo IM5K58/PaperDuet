@@ -295,6 +295,35 @@ test('M3: AC7-11 selection, references, followups, presets and saved AI notes pe
   await expect(page.locator('.ask-message.assistant')).toHaveCount(3);expect(errors).toEqual([]);
 });
 
+test('M3: paper summary tab makes, checks, edits and links the summary',async({page},info)=>{
+  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+  await page.setViewportSize({width:1440,height:960});await page.goto('/?doc=m2-paper');
+  const tabs=page.getByRole('tablist',{name:'보기'});await tabs.getByRole('tab',{name:'요약'}).click();
+  const view=page.getByRole('region',{name:'논문 요약'});
+  await expect(view).toContainText('예상 · AI 호출 3회');await view.getByRole('button',{name:'요약 만들기'}).click();
+  await expect(view.getByRole('heading',{name:'구조화 요약'})).toBeVisible();
+  await expect(view.locator('.summary-field.kind-key')).toContainText('Nova가 풀려는 검출 문제를 다룬다.');
+  await expect(view.locator('.summary-field.kind-res .qa-label')).toHaveCount(1);  // 99.9 is not in Table 1
+  await expect(view.locator('.summary-step')).toHaveCount(2);await expect(view.locator('.summary-visual')).toContainText('핵심 수치를 담은 표');
+  await page.screenshot({path:info.outputPath('summary-desktop.png'),fullPage:true});
+  // An evidence chip returns to the paper at that block.
+  await view.locator('.summary-field.kind-res .summary-ref').first().click();
+  await expect(tabs.getByRole('tab',{name:'본문'})).toHaveAttribute('aria-selected','true');await expect(page.locator('#b0003')).toBeInViewport();
+  await tabs.getByRole('tab',{name:'요약'}).click();
+  // Edit, keep across reloads, send to the presentation notes, and ask about a point.
+  const result=view.locator('.summary-field.kind-res .summary-point').last();
+  await result.getByRole('button',{name:'고치기'}).click();await result.getByRole('textbox').fill('Nova는 AP 42.0으로 가장 높다.');await result.getByRole('button',{name:'저장'}).click();
+  await expect(result).toContainText('직접 수정');await expect(result.locator('.qa-label')).toHaveCount(0);
+  await result.getByRole('button',{name:'발표 노트에 추가'}).click();await expect(view.getByRole('status')).toContainText('발표 노트에 추가했습니다');
+  await result.getByRole('button',{name:'AI에게 질문'}).click();
+  const panel=page.getByRole('dialog',{name:'Ask AI',exact:true});await expect(panel.locator('.selected-quote')).toContainText('Nova는 AP 42.0으로 가장 높다.');
+  await panel.getByRole('button',{name:'AI 질문 닫기',exact:true}).click();
+  await page.reload();await page.getByRole('tablist',{name:'보기'}).getByRole('tab',{name:'요약'}).click();
+  await expect(page.getByRole('region',{name:'논문 요약'})).toContainText('직접 수정함');
+  await page.getByRole('button',{name:'다시 만들기'}).click();await expect(page.getByRole('alert')).toContainText('직접 고친 내용이 사라집니다');
+  expect(errors).toEqual([]);
+});
+
 test('M3: dark 390px question overlay, focus and no horizontal overflow',async({page},info)=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'dark'});await page.goto('/?doc=m2-paper');
@@ -388,10 +417,10 @@ test('Tutorial: first launch opens guide without marking AI setup complete or se
   await page.reload();await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();await expect(welcome).toHaveCount(0);
 });
 
-test('Tutorial: all ten scenes at 390px, both themes, examples and progress survive reload',async({page},info)=>{
+test('Tutorial: all eleven scenes at 390px, both themes, examples and progress survive reload',async({page},info)=>{
   const errors:string[]=[];const writes:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('request',r=>{if(r.method()!=='GET')writes.push(new URL(r.url()).pathname);});
   await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'light'});await page.goto('/?tutorial=connect');
-  const scenes=['connect','import','translate','read','original','ask','review','present','export','settings'];
+  const scenes=['connect','import','translate','read','original','ask','review','summary','present','export','settings'];
   for(const theme of ['light','dark']){
     while(await page.locator('html').getAttribute('data-theme')!==theme)await page.getByRole('button',{name:'가이드 테마 변경'}).click();
     for(const id of scenes){await page.getByLabel('설명 선택').selectOption(id);await expect(page.locator('.tutorial-preview')).toBeVisible();expect(await page.evaluate(()=>Math.max(0,document.documentElement.scrollWidth-innerWidth))).toBe(0);}
@@ -407,7 +436,7 @@ test('Tutorial: library and reader entry points, browser history, real settings 
   await page.setViewportSize({width:1440,height:1000});await page.goto('/?library=1');await page.getByRole('button',{name:'사용 가이드',exact:true}).click();
   await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();await page.screenshot({path:info.outputPath('tutorial-desktop.png')});
   await page.getByRole('button',{name:'다음 설명 →'}).click();await expect(page).toHaveURL(/tutorial=import/);await page.goBack();await expect(page.getByRole('heading',{name:'먼저, AI와 연결해요.'})).toBeVisible();
-  await page.getByRole('navigation',{name:'가이드 설명'}).getByRole('button',{name:'10 저장·문제 해결'}).click();await page.getByRole('button',{name:'실제 앱 설정 열기 ↗'}).click();await expect(page.getByRole('dialog',{name:'앱 설정'})).toBeVisible();await page.keyboard.press('Escape');
+  await page.getByRole('navigation',{name:'가이드 설명'}).getByRole('button',{name:'11 저장·문제 해결'}).click();await page.getByRole('button',{name:'실제 앱 설정 열기 ↗'}).click();await expect(page.getByRole('dialog',{name:'앱 설정'})).toBeVisible();await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'서재로 시작하기 →'}).click();await expect(page.getByRole('heading',{name:'나의 논문 서재'})).toBeVisible();await page.getByRole('button',{name:'사용 가이드',exact:true}).click();await expect(page.getByRole('heading',{name:'계속 사용할 준비가 됐어요.'})).toBeVisible();
   await page.getByRole('button',{name:'서재로',exact:true}).click();await expect(page.getByRole('heading',{name:'나의 논문 서재'})).toBeVisible();
 });

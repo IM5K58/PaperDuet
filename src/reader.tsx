@@ -5,6 +5,7 @@ import { PdfPreview } from './pdf-preview';
 import { DocumentActions } from './m4';
 import { Inline, NOTE_NAMES, ReaderBlock } from './blocks';
 import { BrandMark, Icon } from './icons';
+import { SummaryView } from './summary';
 import { resolveTheme } from './theme';
 import type { Block, Document, NoteKind, Settings, View } from './types';
 
@@ -30,6 +31,11 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
   const [progress, setProgress] = useState(0);
   const [copy, setCopy] = useState('');
   const [guide, setGuide] = useState(() => !guideHidden());
+  // 본문 | 요약. While the summary is open the reading position is left untouched.
+  const [tab, setTab] = useState<'paper' | 'summary'>('paper');
+  const [pendingJump, setPendingJump] = useState<string | null>(null);
+  const summaryOpen = useRef(false);
+  summaryOpen.current = tab === 'summary';
   const searchRef = useRef<HTMLInputElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
@@ -98,6 +104,26 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
     }
     setDrawer(false);
   }, []);
+  // From the summary (or the contents while it is open): back to the paper, then to the block.
+  const goToBlock = useCallback((id: string) => { setTab('paper'); setPendingJump(id); setDrawer(false); }, []);
+  const switchTab = (next: 'paper' | 'summary') => {
+    if (next === tab) return;
+    setTab(next);
+    if (next === 'paper') { if (latestPosition.current.block_id) setPendingJump(latestPosition.current.block_id); }
+    else requestAnimationFrame(() => document.querySelector('.reader-tabs')?.scrollIntoView({ block: 'start' }));
+  };
+  useEffect(() => {
+    if (tab !== 'paper' || !pendingJump) return;
+    const id = pendingJump; setPendingJump(null);
+    requestAnimationFrame(() => {
+      const back = id === latestPosition.current.block_id;
+      jump(id, back ? latestPosition.current.offset : 0);
+      if (back) return;
+      const element = document.getElementById(id);
+      element?.classList.add('summary-target');
+      setTimeout(() => element?.classList.remove('summary-target'), 2000);
+    });
+  }, [tab, pendingJump, jump]);
 
   useEffect(() => {
     if (!doc || restored.current) return;
@@ -118,11 +144,12 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
     let frame = 0;
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     const savePosition = () => {
-      if (!restored.current) return;
+      if (!restored.current || summaryOpen.current) return;
       void request(`/documents/${doc.id}/position`, { method: 'PATCH', body: JSON.stringify(latestPosition.current), keepalive: true })
         .then(() => setSaveError(false)).catch(() => setSaveError(true));
     };
     const update = () => {
+      if (summaryOpen.current) { frame = 0; return; }
       const max = document.documentElement.scrollHeight - window.innerHeight;
       setProgress(max > 0 ? Math.min(100, Math.max(0, window.scrollY / max * 100)) : 0);
       const threshold = (document.querySelector('.topbar')?.getBoundingClientRect().height ?? 64) + 28;
@@ -197,7 +224,7 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
   };
   const anchorClick = (event: React.MouseEvent) => {
     const a = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="#"]');
-    if (a) { event.preventDefault(); jump(a.hash.slice(1)); }
+    if (a) { event.preventDefault(); if (summaryOpen.current) goToBlock(a.hash.slice(1)); else jump(a.hash.slice(1)); }
   };
 
   if (loading || error) return <div className="startup"><BrandMark className="brand-mark startup-mark"/><h1>PaperDuet</h1>
@@ -239,13 +266,16 @@ export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=fal
         <button className="guide-close" aria-label="읽기 안내 닫기" title="다시 보지 않기" onClick={() => { setGuide(false); try { localStorage.setItem(GUIDE_KEY, '1'); } catch { /* storage unavailable */ } }}><Icon name="close"/></button></div>}
       {doc.status==='fixture'?<details className="source-note"><summary>이 리더의 수록 범위와 주석 근거</summary><p>제공된 샘플의 1–31쪽 범위를 수록했습니다. 그림은 캡션만, 표는 제공된 한국어 헤더·캡션을 표시합니다. 주석은 레퍼런스의 해설이며, 근거 후보는 인접 블록과 명시된 참조에서 연결했습니다. 원문 대조 검토가 필요합니다. 원 논문: Qing Jiang 외, “Detect Anything via Next Point Prediction”, arXiv:2510.12798, CC BY 4.0.</p></details>:!!doc.glossary.length&&<details className="source-note"><summary>이 논문의 용어집 · {doc.glossary.length}개</summary><dl>{doc.glossary.map(g=><div key={g.term}><dt><b>{g.term}</b> · {g.ko}</dt><dd>{g.definition_ko}</dd></div>)}</dl></details>}
     </section>
+    {!offline&&<div className="reader-tabs" role="tablist" aria-label="보기">{([['paper','본문'],['summary','요약']] as const).map(([id,name])=>
+      <button key={id} role="tab" aria-selected={tab===id} onClick={()=>switchTab(id)}>{name}</button>)}</div>}
+    {tab==='summary'?<SummaryView doc={doc} labels={evidence} onJump={goToBlock} onAsk={anchor=>ask.open(anchor)}/>:<>
     <div className="column-labels" aria-hidden="true"><span className="en">English <b>원문</b></span><span className="ko">Korean <b>번역</b></span></div>
     <article aria-label="논문 본문">{shownBlocks.map(b => <div key={b.id} className={`reader-block-wrap ${doc.status!=='fixture'&&b.qa_flags.length?'qa-block':''}`}><ReaderBlock block={b} evidence={evidence} />{!offline&&<div className="block-ask-actions"><button aria-label={`${b.n||b.id} AI에게 질문`} onClick={()=>ask.open({block_id:b.id,field:'en',start:0,end:0,text:''})}><Icon name="message"/>질문</button>{ask.threads.some(t=>t.block_id===b.id)&&<button className="thread-badge" aria-label={`${b.id} 대화 보기`} onClick={()=>ask.open({block_id:b.id,field:'en',start:0,end:0,text:''},undefined,ask.threads.find(t=>t.block_id===b.id)!.id)}>◌ {ask.threads.filter(t=>t.block_id===b.id).length}</button>}</div>}{!offline&&doc.status!=='fixture'&&!b.section_path.some(p=>/^(references|bibliography)$/i.test(p))&&<BlockTools block={b} onUpdate={refreshDoc}/>}</div>)}</article>
-    <footer className="paper-end"><span>End of reading</span><p>{doc.title}</p><small>{doc.status==='fixture'?'레퍼런스 수록 범위의 끝입니다.':'문서의 끝입니다.'} 참고문헌은 번역하지 않습니다.</small></footer>
+    <footer className="paper-end"><span>End of reading</span><p>{doc.title}</p><small>{doc.status==='fixture'?'레퍼런스 수록 범위의 끝입니다.':'문서의 끝입니다.'} 참고문헌은 번역하지 않습니다.</small></footer></>}
     </div></main></div>
     {pdfOpen&&<PdfPreview docId={doc.id} pages={doc.page_count} onClose={()=>setPdfOpen(false)} onProcess={()=>onProcess?.()}/>}
     {ask.selected&&!ask.anchor&&<SelectionActions anchor={ask.selected} onOpen={ask.open}/>}
-    {ask.anchor&&<AskPanel key={`${ask.anchor.block_id}-${ask.threadId??'new'}-${ask.anchor.start}`} doc={doc} anchor={ask.anchor} threadId={ask.threadId} preset={ask.preset} onClose={ask.close} onSaved={refreshDoc} onThreads={ask.refresh}/>}
+    {ask.anchor&&<AskPanel key={`${ask.anchor.block_id}-${ask.threadId??'new'}-${ask.anchor.field}-${ask.anchor.start}-${ask.anchor.end}`} doc={doc} anchor={ask.anchor} threadId={ask.threadId} preset={ask.preset} onClose={ask.close} onSaved={refreshDoc} onThreads={ask.refresh}/>}
     <div className="reading-status"><span>{Math.round(progress)}%</span><button aria-label="현재 위치 링크 복사" title="현재 위치 링크 복사" onClick={async () => { try { await navigator.clipboard.writeText(`#${latestPosition.current.block_id ?? 'b0000'}`); setCopy('복사됨'); } catch { setCopy('복사 실패'); } }}>{copy || <Icon name="link"/>}</button><button aria-label="맨 위로" onClick={() => { history.replaceState(null, '', location.pathname); window.scrollTo({ top: 0, behavior: 'instant' }); }}><Icon name="arrowUp"/></button></div>
   </div>;
 }
