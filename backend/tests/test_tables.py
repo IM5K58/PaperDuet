@@ -3,7 +3,7 @@ import asyncio
 
 from paperduet.models import Block, Cell, PipelineOptions, Table
 from paperduet.pipeline import Pipeline
-from paperduet.validation import suspicious_table, validate_block
+from paperduet.validation import table_grid
 from m2_sample import seed
 
 
@@ -21,13 +21,11 @@ GOOD = Table(header=[row('Method', 'AUROC', 'AP')],
              body=[row(f'M{i}', f'{80 + i}.1', f'{70 + i}.2') for i in range(8)])
 
 
-def test_merged_or_partial_grids_are_distrusted_and_normal_ones_are_not():
-    assert suspicious_table(MERGED)
-    assert not suspicious_table(GOOD)
-    region = ' '.join(f'{90 + i}.5' for i in range(40))  # the page shows far more numbers than the grid holds
-    assert suspicious_table(GOOD, region) and not suspicious_table(GOOD, ' '.join(['81.1'] * 16))
-    block = Block(id='t', doc_id='d', order=0, type='tab', section_path=[], table=MERGED)
-    assert 'V4' in validate_block(block, block, [])
+def test_tables_are_not_judged_by_the_distribution_of_numbers():
+    assert table_grid(MERGED)[1]==3
+    assert table_grid(GOOD)[1]==3
+    block=Block(id='t',doc_id='d',order=0,type='tab',section_path=[],table=MERGED,qa_flags=['V4'])
+    assert block.qa_flags==[]
 
 
 def test_restore_replaces_a_distrusted_grid_from_the_image(tmp_path):
@@ -43,15 +41,15 @@ def test_restore_replaces_a_distrusted_grid_from_the_image(tmp_path):
     assert block.qa_flags == [] and len(block.table.body) == 2 and len(block.table.header[0]) == 3
 
 
-def test_papers_processed_earlier_get_their_broken_tables_flagged(tmp_path):
-    store, doc_id = seed(tmp_path)
-    doc = store.document(doc_id)
-    table = next(b for b in doc.blocks if b.type == 'tab')
-    table.table = MERGED
-    store.save_blocks(doc_id, [table])
-    pipeline = Pipeline(store, None)
-    pipeline.flag_suspicious_tables(doc_id)
-    pipeline.flag_suspicious_tables(doc_id)  # idempotent
-    flagged = next(b for b in store.document(doc_id).blocks if b.id == table.id)
-    assert flagged.qa_flags.count('V4') == 1
-    assert store.job(doc_id)['status'] == 'review'
+def test_legacy_review_status_is_normalized_without_altering_table_content(tmp_path):
+    store,doc_id=seed(tmp_path)
+    doc=store.document(doc_id);table=next(b for b in doc.blocks if b.type=='tab')
+    before=table.model_dump()
+    with store.connect() as db:
+        db.execute("UPDATE documents SET status='review' WHERE id=?",(doc_id,))
+        db.execute("UPDATE jobs SET status='review',checkpoint=json_set(checkpoint,'$.review_count',99) WHERE doc_id=?",(doc_id,))
+        db.execute("UPDATE blocks SET payload=json_set(payload,'$.qa_flags',json('[\"V4\"]')) WHERE doc_id=? AND id=?",(doc_id,table.id))
+    asyncio.run(Pipeline(store,None).recover())
+    assert next(b for b in store.document(doc_id).blocks if b.id==table.id).model_dump()==before
+    assert store.job(doc_id)['status']=='complete'
+    assert 'review_count' not in store.job(doc_id)['checkpoint']

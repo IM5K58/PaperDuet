@@ -81,8 +81,8 @@ def test_summary_is_made_on_request_with_checked_evidence(api):
     assert all(c['refs'] != ['b0007'] and 'b9999' not in c['refs'] for s in paper['sections'] for c in s['claims'])
     s = state['payload']['structured']
     assert s['problem'] == [{'text': 'Nova가 해결하려는 문제', 'refs': ['b0001'], 'flags': []}]
-    assert s['gap'] == [] and s['method'] == []  # reference-only or unsupported points are dropped
-    assert [p['flags'] for p in s['results']] == [[], ['V5']]  # 99.9 is not in Table 1
+    assert all(p['refs']==[] for p in s['gap']+s['method'])  # Text is retained without a quality judgment.
+    assert [p['flags'] for p in s['results']] == [[], []]  # Numbers do not create quality flags.
     flow = state['payload']['flow']
     assert [f['block_id'] for f in flow] == ['b0000', 'b0002', None]
     assert state['payload']['visuals'] == [{'block_id': 'b0003', 'why': '결과 표'}]

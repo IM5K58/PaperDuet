@@ -3,6 +3,9 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
@@ -14,6 +17,7 @@ from paperduet.cli_provider import CLIProvider, execute, resolve_cli
 from paperduet.models import Block, PipelineOptions
 from paperduet.provider import ProviderError
 from paperduet.providers import APIProvider, Redactor
+from paperduet.store import Store
 from m2_sample import FIXTURE, seed
 
 class Vault:
@@ -83,6 +87,20 @@ def test_ac7_equation_and_figure_reference_resolution_and_utf16(tmp_path):
     context,_=build_context(store,req,AskSettings())
     assert {b['id'] for b in context['references']}=={'b0003','b0004','b0005'}
 
+def test_compact_thread_keeps_message_evidence_available_on_demand(api):
+    client,_,_,_=api
+    result=events(client.post('/ask',json=body(full_context=True)))
+    tid=result[0]['thread_id'];mid=result[-1]['message_id']
+    full=client.get('/threads/'+tid).json()
+    compact=client.get('/threads/'+tid+'?compact=true').json()
+    assert [m['content_md'] for m in compact['messages']]==[m['content_md'] for m in full['messages']]
+    assert compact['messages'][-1]['context_snapshot']['context']['selection']['text']=='We'
+    assert 'messages' not in compact['messages'][-1]['context_snapshot']
+    assert client.get(f'/threads/{tid}/messages/{mid}/context').json()==full['messages'][-1]['context_snapshot']
+    assert client.get(f'/threads/wrong/messages/{mid}/context').status_code==404
+    assert client.post('/ask',json=body(thread_id=tid,regenerate=True)).status_code==200
+
+
 def test_ac8_stream_followup_regeneration_usage_persist_and_save_note(api):
     client,provider,store,_=api
     result=events(client.post('/ask',json=body()));tid=result[0]['thread_id'];mid=result[-1]['message_id']
@@ -93,7 +111,8 @@ def test_ac8_stream_followup_regeneration_usage_persist_and_save_note(api):
     assert thread['messages'][1]['context_snapshot']['messages']==provider.calls[0][2]
     client.post('/ask',json=body(thread_id=tid,question='다시 설명'))
     assert [m['role'] for m in provider.calls[-1][2]]==['user','assistant','user']
-    assert provider.calls[-1][2][0]['content']=='쉽게 설명해 줘'
+    previous=json.loads(provider.calls[-1][2][0]['content'])
+    assert previous['question']=='쉽게 설명해 줘' and previous['selection']['text']=='We'
     client.post('/ask',json=body(thread_id=tid,regenerate=True))
     assert len(client.get('/threads/'+tid).json()['messages'])==5
     saved=client.post(f'/threads/{tid}/save-as-note',json={'message_id':mid,'kind':'ins'})
@@ -115,6 +134,92 @@ def test_errors_and_recovery_do_not_look_complete(api):
     from paperduet.providers import ProviderRegistry
     AskService(store,ProviderRegistry(store,Vault()))
     assert client.get('/threads/'+tid).json()['messages'][-1]['status']=='interrupted'
+
+
+def test_paper_questions_and_changing_selections_keep_one_conversation(api):
+    client,provider,store,_=api
+    paper={'block_id':'b0000','field':'document'}
+    context=client.post('/ask/context',json=body(anchor=paper)).json()['snapshot']['context']
+    assert context['block'] is None and context['neighbors']==[] and context['image'] is None
+    assert len(context['full_paper'])==8 and context['selection']['field']=='document'
+    first=events(client.post('/ask',json=body()))
+    tid=first[0]['thread_id'];first_mid=first[-1]['message_id']
+    second=events(client.post('/ask',json=body(thread_id=tid,anchor={'block_id':'b0005'},question='이번에는 그림을 설명해 줘')))
+    assert second[0]['thread_id']==tid and second[0]['context']['context']['image']['attached']
+    assert second[0]['context']['context']['selection']['block_id']=='b0005'
+    assert len(provider.calls[-1][2])==3
+    # Switching the current selection must not change the source of a regeneration.
+    regenerated=events(client.post('/ask',json=body(thread_id=tid,anchor=paper,regenerate=True)))
+    assert regenerated[0]['context']['context']['selection']['block_id']=='b0005'
+    assert regenerated[0]['context']['context']['image']['attached']
+    assert json.loads(provider.calls[-1][2][-1]['content'])['question']=='이번에는 그림을 설명해 줘'
+    later=events(client.post('/ask',json=body(thread_id=tid,anchor=paper,question='논문 전체의 기여는?')))
+    assert later[0]['context']['context']['block'] is None
+    assert len(client.get('/threads?doc_id=m2-paper').json())==1
+    # Earlier answers still attach to their own source, not the latest selection.
+    note=client.post(f'/threads/{tid}/save-as-note',json={'message_id':first_mid,'kind':'ins'}).json()
+    assert note['note']['refs'][0]=='b0001'
+    memo=client.post('/documents/m2-paper/memos',json={'message_id':second[-1]['message_id'],'title':'그림 답변'}).json()
+    assert memo['block_id']=='b0005'
+    memo=client.post('/documents/m2-paper/memos',json={'message_id':later[-1]['message_id'],'title':'논문 답변'}).json()
+    assert memo['block_id'] is None
+    assert client.post('/ask/context',json=body(thread_id=tid,doc_id='rex-omni')).status_code==422
+    assert client.post('/ask/context',json=body(thread_id=tid,anchor={'block_id':'b0001','text':'fake','end':4})).status_code==422
+
+
+def test_thread_titles_rename_persist_validate_and_preserve_existing_conversations(api):
+    client,_,store,vault=api
+    tid=events(client.post('/ask',json=body(thread_title='처음 이름')))[0]['thread_id']
+    assert client.get('/threads/'+tid).json()['title']=='처음 이름'
+    assert client.patch('/threads/'+tid,json={'title':'  방법 비교  '}).json()['title']=='방법 비교'
+    assert client.get('/threads?doc_id=m2-paper').json()[0]['title']=='방법 비교'
+    assert len(client.get('/threads/'+tid).json()['messages'])==2
+    assert client.patch('/threads/'+tid,json={'title':'   '}).status_code==422
+    assert client.patch('/threads/'+tid,json={'title':'x'*121}).status_code==422
+    assert client.patch('/threads/missing',json={'title':'제목'}).status_code==404
+    client.patch('/threads/'+tid,json={'title':'비밀 '+vault.key})
+    assert vault.key not in client.get('/threads/'+tid).text
+    # Simulate an existing version-8 database and keep its conversation on upgrade.
+    with store.connect() as db:
+        db.execute('ALTER TABLE threads DROP COLUMN title')
+        db.execute('DELETE FROM schema_migrations WHERE version=9')
+        db.execute('PRAGMA user_version=8')
+    upgraded=Store(store.data_dir,FIXTURE)
+    with upgraded.connect() as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0]==9
+        assert db.execute('SELECT title FROM threads WHERE id=?',(tid,)).fetchone()[0]==''
+        assert db.execute('SELECT COUNT(*) FROM messages WHERE thread_id=?',(tid,)).fetchone()[0]==2
+
+
+def test_independent_threads_generate_and_rename_concurrently(api):
+    client,_,_,_=api
+    gates={name:threading.Event() for name in ('A','B')}
+    class Gated(ChatDouble):
+        async def stream(self,model,system,messages,image=None):
+            yield {'text':model+' 시작'}
+            while not gates[model].is_set():await asyncio.sleep(.01)
+            yield {'text':model+' 완료'}
+            yield {'usage':{'tokens_in':1,'tokens_out':2}}
+    client.app.state.ask.override=Gated()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first=pool.submit(client.post,'/ask',json=body(model='A',thread_title='대화 A'))
+        second=pool.submit(client.post,'/ask',json=body(model='B',thread_title='대화 B'))
+        try:
+            deadline=time.monotonic()+5
+            while time.monotonic()<deadline:
+                rows=client.get('/threads?doc_id=m2-paper').json()
+                if len(rows)==2 and all(t['running'] for t in rows):break
+                time.sleep(.01)
+            assert len(rows)==2 and all(t['running'] for t in rows)
+            a=next(t['id'] for t in rows if t['title']=='대화 A')
+            assert client.patch('/threads/'+a,json={'title':'생성 중 이름 변경'}).status_code==200
+            assert client.post('/ask',json=body(thread_id=a)).status_code==409
+            gates['B'].set();assert events(second.result(timeout=5))[-1]['status']=='complete'
+            assert not first.done() and client.get('/threads/'+a).json()['title']=='생성 중 이름 변경'
+            gates['A'].set();assert events(first.result(timeout=5))[-1]['status']=='complete'
+            assert all(not t['running'] for t in client.get('/threads?doc_id=m2-paper').json())
+        finally:
+            for gate in gates.values():gate.set()
 
 def test_presets_settings_and_known_secret_redaction(api):
     client,_,store,vault=api
@@ -245,6 +350,14 @@ def test_original_page_is_authenticated_and_bounded(api,tmp_path):
     assert client.get('/documents/m2-paper/pages/0/image').status_code==404
     assert client.get('/documents/m2-paper/pages/2/image').status_code==404
     assert client.get('/documents/m2-paper/pages/1/image',headers={'Authorization':''}).status_code==401
+
+def test_block_image_does_not_load_the_whole_document(api,monkeypatch):
+    client,_,store,_=api
+    def unexpected(*args,**kwargs):raise AssertionError('Image lookup loaded the entire paper')
+    monkeypatch.setattr(store,'document',unexpected)
+    image=client.get('/documents/m2-paper/blocks/b0005/image')
+    assert image.status_code==200 and image.json()['data_url'].startswith('data:image/png;base64,')
+    assert client.get('/documents/m2-paper/blocks/missing/image').status_code==404
 
 def test_cli_sources_never_read_credentials():
     root=Path(__file__).resolve().parents[1]/'paperduet'

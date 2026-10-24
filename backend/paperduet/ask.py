@@ -45,7 +45,7 @@ class AskSettings(Model):
 class Anchor(Model):
     block_id: str=Field(min_length=1,max_length=120)
     # 'summary': a point of the paper summary, asked about at its first evidence block.
-    field: Literal['en','ko','caption_en','caption_ko','latex','note','card','summary']='en'
+    field: Literal['en','ko','caption_en','caption_ko','latex','note','card','summary','document']='en'
     start: int=Field(default=0,ge=0)
     end: int=Field(default=0,ge=0)
     text: str=Field(default='',max_length=30000)
@@ -56,6 +56,7 @@ class AskInput(Model):
     question: str=Field(min_length=1,max_length=12000)
     preset: str|None=Field(default=None,max_length=80)
     thread_id: str|None=Field(default=None,max_length=80)
+    thread_title: str|None=Field(default=None,min_length=1,max_length=120)
     regenerate: bool=False
     provider: Literal['anthropic','openai','google']='anthropic'
     mode: Literal['api_key','cli']='api_key'
@@ -97,6 +98,16 @@ def build_context(store,request,settings):
     blocks=doc.blocks;by_id={b.id:b for b in blocks};block=by_id.get(request.anchor.block_id)
     if not block: raise ValueError('ANCHOR_NOT_FOUND')
     anchor=request.anchor
+    if anchor.field=='document':
+        # The block id only keeps compatibility with existing thread foreign keys.
+        # A paper question has no selected block and always sees the source paper.
+        if anchor.text or anchor.start or anchor.end: raise ValueError('SELECTION_CHANGED')
+        context={'metadata':{'title':doc.title,'title_ko':doc.title_ko,'arxiv_id':doc.arxiv_id,'authors':doc.authors},
+            'abstract':[source_block(b) for b in blocks if any(p.lower()=='abstract' for p in b.section_path) and not b.note],
+            'glossary':[], 'section_path':[], 'headings':[source_block(b) for b in blocks if b.type in {'sec','sub','ssub'}],
+            'selection':anchor.model_dump(),'block':None,'neighbors':[],'references':[],
+            'full_paper':paper_blocks(blocks),'image':None}
+        return context,None
     if anchor.text and anchor.field!='summary':  # a summary point is quoted whole, not a range of the block
         content=block.note.body_md if anchor.field=='note' and block.note else block.card.body if anchor.field=='card' and block.card else getattr(block,anchor.field,'')
         try: exact=utf16_slice(plain(content),anchor.start,anchor.end)
@@ -144,29 +155,60 @@ class AskService:
 
     def threads(self,doc_id):
         with self.store.connect() as db:
-            return [dict(r) for r in db.execute('SELECT t.*, (SELECT COUNT(*) FROM messages m WHERE m.thread_id=t.id) AS message_count FROM threads t WHERE doc_id=? ORDER BY t.rowid DESC',(doc_id,))]
+            return [dict(r,running=r['id'] in self.active) for r in db.execute('SELECT t.*, (SELECT COUNT(*) FROM messages m WHERE m.thread_id=t.id) AS message_count FROM threads t WHERE doc_id=? ORDER BY t.rowid DESC',(doc_id,))]
 
-    def thread(self,tid):
+    def rename(self,tid,title):
+        title=title.strip()
+        if not title: raise ValueError('INVALID_THREAD_TITLE')
+        with self.store.connect() as db:
+            if not db.execute('UPDATE threads SET title=? WHERE id=?',(self.registry.redact(title),tid)).rowcount:
+                raise ValueError('THREAD_NOT_FOUND')
+            return dict(db.execute('SELECT id,title FROM threads WHERE id=?',(tid,)).fetchone())
+
+    def thread(self,tid,compact=False):
         with self.store.connect() as db:
             row=db.execute('SELECT * FROM threads WHERE id=?',(tid,)).fetchone()
             if not row: raise ValueError('THREAD_NOT_FOUND')
             thread=dict(row);thread['anchor']=json.loads(thread['anchor'])
-            thread['messages']=[{**dict(m),'context_snapshot':json.loads(m['context_snapshot'])} for m in db.execute('SELECT * FROM messages WHERE thread_id=? ORDER BY rowid',(tid,))]
+            columns='*' if not compact else '''id,thread_id,role,content_md,provider,mode,model,status,error_code,tokens_in,tokens_out,created_at,
+                CASE WHEN role='user' THEN context_snapshot ELSE json_object('context',json_object(
+                    'selection',json_extract(context_snapshot,'$.context.selection'),
+                    'image',json_extract(context_snapshot,'$.context.image')), 'full_context',
+                    CASE WHEN json_type(context_snapshot,'$.context.full_paper') IS NOT NULL THEN 1 ELSE 0 END) END AS context_snapshot'''
+            thread['messages']=[{**dict(m),'context_snapshot':json.loads(m['context_snapshot'])} for m in db.execute(f'SELECT {columns} FROM messages WHERE thread_id=? ORDER BY rowid',(tid,))]
             return thread
+
+    def message_context(self,tid,mid):
+        with self.store.connect() as db:
+            row=db.execute('SELECT context_snapshot FROM messages WHERE thread_id=? AND id=?',(tid,mid)).fetchone()
+            if not row:raise ValueError('MESSAGE_NOT_FOUND')
+            return json.loads(row[0])
 
     def prepare(self,request):
         settings=self.settings()
         history=[]
         if request.thread_id:
-            thread=self.thread(request.thread_id)
-            if thread['doc_id']!=request.doc_id or thread['block_id']!=request.anchor.block_id: raise ValueError('ANCHOR_NOT_FOUND')
-            request.anchor=Anchor(**thread['anchor'])
+            thread=self.thread(request.thread_id,compact=True)
+            if thread['doc_id']!=request.doc_id: raise ValueError('ANCHOR_NOT_FOUND')
             records=thread['messages']
             if request.regenerate:
                 last_user=next((m for m in reversed(records) if m['role']=='user'),None)
                 if not last_user: raise ValueError('THREAD_NOT_FOUND')
+                saved=last_user['context_snapshot']
+                # Older conversations kept the selection on the assistant instead.
+                previous=next((m['context_snapshot'].get('context',{}) for m in records[records.index(last_user)+1:] if m['role']=='assistant'),{})
+                request.anchor=Anchor(**(saved.get('anchor') or previous.get('selection') or thread['anchor']))
+                previous_message=next((m for m in records[records.index(last_user)+1:] if m['role']=='assistant'),{})
+                request.full_context=saved.get('full_context',bool(previous_message.get('context_snapshot',{}).get('full_context')) or 'full_paper' in previous)
+                request.include_image=saved.get('include_image',bool(previous.get('image')))
+                request.preset=saved.get('preset',request.preset)
                 records=records[:records.index(last_user)];request.question=last_user['content_md']
-            history=[{'role':m['role'],'content':m['content_md']} for m in records if m['status']=='complete']
+            for message in records:
+                if message['status']!='complete': continue
+                content=message['content_md']
+                if message['role']=='user' and message['context_snapshot'].get('anchor'):
+                    content=json.dumps({'question':content,'selection':message['context_snapshot']['anchor']},ensure_ascii=False)
+                history.append({'role':message['role'],'content':content})
         context,image=build_context(self.store,request,settings)
         preset=next((p for p in settings.presets if p.id==request.preset),None)
         # The system prompt stays byte-identical across questions (the preset goes
@@ -199,10 +241,13 @@ class AskService:
             adapter=self.override or self.registry.adapter(request.provider,request.mode)
             with self.store.connect() as db:
                 if not request.thread_id:
-                    db.execute('INSERT INTO threads(id,doc_id,block_id,anchor,preset) VALUES(?,?,?,?,?)',(tid,request.doc_id,request.anchor.block_id,self.registry.redact(request.anchor.model_dump_json()),request.preset))
+                    title=self.registry.redact((request.thread_title or request.question).strip()[:120])
+                    db.execute('INSERT INTO threads(id,doc_id,block_id,anchor,preset,title) VALUES(?,?,?,?,?,?)',(tid,request.doc_id,request.anchor.block_id,self.registry.redact(request.anchor.model_dump_json()),request.preset,title))
                 if not request.regenerate:
+                    db.execute('UPDATE threads SET anchor=? WHERE id=?',(self.registry.redact(request.anchor.model_dump_json()),tid))
                     db.execute('INSERT INTO messages(id,thread_id,role,content_md,provider,mode,model,context_snapshot,status) VALUES(?,?,?,?,?,?,?,?,?)',
-                        (uuid.uuid4().hex,tid,'user',redact.clean(request.question),request.provider,request.mode,request.model,'{}','complete'))
+                        (uuid.uuid4().hex,tid,'user',redact.clean(request.question),request.provider,request.mode,request.model,
+                         self.registry.redact(json.dumps({'anchor':request.anchor.model_dump(),'full_context':request.full_context,'include_image':request.include_image,'preset':request.preset},ensure_ascii=False)),'complete'))
                 db.execute('INSERT INTO messages(id,thread_id,role,content_md,provider,mode,model,context_snapshot,status) VALUES(?,?,?,?,?,?,?,?,?)',
                     (mid,tid,'assistant','',request.provider,request.mode,request.model,json.dumps(snapshot,ensure_ascii=False),'running'))
             yield {'event':'start','thread_id':tid,'message_id':mid,'context':snapshot,'stream_granularity':getattr(adapter,'stream_granularity','token')}
@@ -235,13 +280,13 @@ class AskService:
     def save_note(self,tid,mid,kind):
         thread=self.thread(tid);message=next((m for m in thread['messages'] if m['id']==mid and m['role']=='assistant' and m['status']=='complete'),None)
         if not message: raise ValueError('ANSWER_NOT_COMPLETE')
-        doc=self.store.document(thread['doc_id']);anchor=next(b for b in doc.blocks if b.id==thread['block_id'])
+        doc=self.store.document(thread['doc_id'])
         context=message['context_snapshot'].get('context',{})
+        anchor_id=context.get('selection',{}).get('block_id',thread['block_id'])
+        anchor=next(b for b in doc.blocks if b.id==anchor_id)
         refs=list(dict.fromkeys([anchor.id]+[b['id'] for b in context.get('references',[])]))[:32]
         block=Block(id='ask-'+mid,doc_id=doc.id,order=len(doc.blocks),type='note',section_path=anchor.section_path,page=anchor.page,
             note=Note(kind=kind,title='AI 답변',body_md=message['content_md'][:12000],claim='mixed',refs=refs,origin='ai_answer'))
         if len(message['content_md'])>12000: raise ValueError('ANSWER_TOO_LONG')
-        from .annotations import validate_note, first_occurrences
-        block.qa_flags=validate_note(block,{b.id:b for b in doc.blocks},anchor.id,first_occurrences(doc.blocks,doc.glossary))
         self.store.save_annotations(doc.id,'ask:'+mid,[(anchor.id,block)],[],preserve_user=False)
         return block

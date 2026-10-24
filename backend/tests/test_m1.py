@@ -17,7 +17,7 @@ from paperduet.models import Block, Cell, Table, PipelineOptions
 from paperduet.pdf_parser import PyMuPDFParser
 from paperduet.provider import AnthropicProvider, ProviderError
 from paperduet.store import Store
-from paperduet.validation import table_grid, validate_block
+from paperduet.validation import table_grid, translation_complete
 
 FIXTURE=Path(__file__).resolve().parents[2]/'fixtures/rex-omni.blocks.json'
 
@@ -230,19 +230,22 @@ def test_anthropic_transport_auth_json_retry_and_redaction():
     assert all(vault.get().encode() not in r.content for r in requests)
 
 
-def test_validation_coverage_numbers_length_glossary_and_merged_tables():
+def test_translation_completion_uses_presence_only_and_table_structure_stays_valid():
     source=Block(id='b0',doc_id='d',order=0,type='p',section_path=[],en='The model achieves 42.0 percent accuracy in this controlled study.')
     block=source.model_copy(update={'ko':''})
-    assert validate_block(block,source,[])==['V1']
+    assert not translation_complete(block,source)
     block.ko='짧다'
-    assert validate_block(block,source,[{'term':'model','ko':'모델'}])==['V2','V3','V6']
-    assert validate_block(block,source,[],references=True)==[]
+    assert translation_complete(block,source)
+    block.ko=' <b> </b> '
+    assert not translation_complete(block,source)
     table=Table(header=[[Cell(text_en='Model',rowspan=2),Cell(text_en='Scores',colspan=2)],[Cell(text_en='A'),Cell(text_en='B')]],body=[[Cell(text_en='X'),Cell(text_en='1',numeric=True),Cell(text_en='2',numeric=True)]])
     assert table_grid(table)[1]==3
     source_table=Block(id='t',doc_id='d',order=0,type='tab',section_path=[],table=table.model_copy(deep=True))
-    swapped=source_table.model_copy(deep=True)
-    swapped.table.body[0][1].text_en='2';swapped.table.body[0][2].text_en='1'
-    assert 'V4' in validate_block(swapped,source_table,[])
+    assert not translation_complete(source_table)
+    for row in source_table.table.header:
+        for cell in row:cell.text_ko='값'
+    source_table.table.body[0][1].text_en='99999'
+    assert translation_complete(source_table)
     table.body[0].pop()
     with pytest.raises(ValueError):table_grid(table)
 
@@ -267,7 +270,7 @@ def test_migration_from_m0_preserves_fixture_and_reader_settings(tmp_path):
     store=Store(tmp_path,FIXTURE)
     assert store.settings().theme=='dark' and store.settings().font_size==19
     assert len(store.document('rex-omni').blocks)==285
-    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==8
+    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==9
 
 
 def test_multimodal_request_and_upstream_error_are_secret_safe(tmp_path):
@@ -290,7 +293,7 @@ def test_multimodal_request_and_upstream_error_are_secret_safe(tmp_path):
 
 
 @pytest.mark.sample
-def test_restore_rejects_swapped_numbers_and_retains_original(tmp_path):
+def test_restore_keeps_returned_numbers_without_a_quality_retry(tmp_path):
     from paperduet.pipeline import Pipeline
     store=Store(tmp_path,FIXTURE)
     class SwappingProvider:
@@ -303,8 +306,10 @@ def test_restore_rejects_swapped_numbers_and_retains_original(tmp_path):
         table=Table(header=[[Cell(text_en='Model'),Cell(text_en='A'),Cell(text_en='B')]],body=[[Cell(text_en='X'),Cell(text_en='1',numeric=True),Cell(text_en='2',numeric=True)]]))
     block=source.model_copy(deep=True)
     asyncio.run(pipeline.restore_block('rex-omni',block,source,PipelineOptions()))
-    assert provider.calls==2 and block.table==source.table and block.qa_flags==['EXTRACT_REVIEW']
-    with store.connect() as db:assert db.execute('SELECT COUNT(*) FROM ai_usage').fetchone()[0]==2
+    assert provider.calls==1 and block.qa_flags==[]
+    assert [c.text_en for c in block.table.body[0]]==['X','2','1']
+    assert [c.text_en for c in source.table.body[0]]==['X','1','2']
+    with store.connect() as db:assert db.execute('SELECT COUNT(*) FROM ai_usage').fetchone()[0]==1
 
 
 def test_user_pause_survives_app_restart_until_explicit_resume(tmp_path):

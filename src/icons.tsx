@@ -1,7 +1,17 @@
+import brandIcon from '../src-tauri/icons/128x128.png?inline';
+
 // Line icons (24px grid, 1.6px stroke). Inline SVG so the offline export needs no assets.
 const PATHS = {
   search: ['M18 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0z', 'm20 20-3.5-3.5'],
+  book: ['M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5z', 'M20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z'],
+  gear: ['M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z', 'M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z'],
+  more: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
+  activity: ['M4 12h4l2-5 4 10 2-5h4'],
+  notebook: ['M6 3h13a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6V3z', 'M3 7h5', 'M3 12h5', 'M3 17h5', 'M11 8h5', 'M11 12h5'],
+  resize: ['m10 20 10-10', 'm15 20 5-5'],
+  sort: ['M7 5v14', 'm4 16 3 3 3-3', 'M17 19V5', 'm14 8 3-3 3 3'],
   textSmaller: ['M3 18 8 6l5 12', 'M4.7 14h6.6', 'M15.5 12h5.5'],
+  type: ['M3 18 7.5 6 12 18', 'M4.5 14h6', 'm15 18 3-8 3 8', 'M16 15h4'],
   textLarger: ['M3 18 8 6l5 12', 'M4.7 14h6.6', 'M15.5 12h5.5', 'M18.25 9.25v5.5'],
   sun: ['M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z', 'M12 2.5v2', 'M12 19.5v2', 'm5.3 5.3 1.4 1.4', 'm17.3 17.3 1.4 1.4', 'M2.5 12h2', 'M19.5 12h2', 'm5.3 18.7 1.4-1.4', 'm17.3 6.7 1.4-1.4'],
   moon: ['M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z'],
@@ -31,11 +41,7 @@ export function Icon({ name }: { name: IconName }) {
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{PATHS[name].map(d => <path key={d} d={d} />)}</svg>;
 }
 
-// The app icon (src-tauri/icons/icon.svg), inline so the offline export needs no asset.
+// Share the installed app icon; inline the PNG so exported readers stay offline.
 export function BrandMark({ className = 'brand-mark' }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 128 128" aria-hidden="true" focusable="false">
-    <rect width="128" height="128" rx="28" fill="#185fc2" />
-    <path d="M29 32h28c19 0 30 10 30 26S76 84 57 84H43v18H29zm14 13v26h14c11 0 16-4 16-13s-5-13-16-13z" fill="#fff" />
-    <path d="M88 42h11v57H67V87h21z" fill="#a7ccff" />
-  </svg>;
+  return <img className={className} src={brandIcon} alt="" aria-hidden="true" draggable={false}/>;
 }

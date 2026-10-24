@@ -1,14 +1,15 @@
 {
   "name": "paperduet",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "dev:web": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "preview": "vite preview --host 127.0.0.1 --port 1420 --strictPort",
     "build:web": "tsc -b && vite build && npm run build:export",
     "build:sidecar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1",
+    "build:icons": "node scripts/make-icons.mjs",
     "build": "npm run build:sidecar && tauri build --bundles nsis",
     "test:e2e": "playwright test",
     "test:backend": ".venv\\Scripts\\python.exe -m pytest backend/tests -q",

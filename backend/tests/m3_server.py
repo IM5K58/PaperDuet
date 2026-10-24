@@ -14,6 +14,24 @@ from paperduet.provider import ProviderError
 
 class E2EDouble(ChatDouble):
     """Ask streaming plus the two paper-summary stages for the reader's summary tab."""
+    def __init__(self,directory):
+        super().__init__();self.directory=directory
+
+    async def stream(self,model,system,messages,image=None):
+        content=messages[-1]['content']
+        if isinstance(content,list):content=content[-1]['text']
+        question=json.loads(content).get('question','')
+        if question.startswith('동시 생성 '):
+            yield {'text':question+' 시작\n\n'}
+            for number in range(150):
+                if (self.directory/('ask-release-'+question[-1])).exists():break
+                await asyncio.sleep(.2)
+                yield {'text':f'{question} 진행 {number+1}\n\n'}
+            yield {'text':question+' 완료'}
+            yield {'usage':{'tokens_in':123,'tokens_out':45}}
+            return
+        async for event in super().stream(model,system,messages,image):yield event
+
     async def json(self,stage,model,payload,image=None):
         await asyncio.sleep(.2)
         if stage=='summary_section':
@@ -28,7 +46,7 @@ class E2EDouble(ChatDouble):
 async def main():
     directory=Path(os.environ.pop('PAPERDUET_DATA_DIR'));token=os.environ.pop('PAPERDUET_SESSION_TOKEN')
     seed(directory)
-    app=create_app(token,directory,FIXTURE,'http://127.0.0.1:1420',vault=Vault(),provider=E2EDouble())
+    app=create_app(token,directory,FIXTURE,'http://127.0.0.1:1420',vault=Vault(),provider=E2EDouble(directory))
     if os.environ.pop('PAPERDUET_TEST_ARXIV',''):
         import httpx,pymupdf
         from test_m4 import HTML

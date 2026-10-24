@@ -41,7 +41,7 @@ mkdirSync(new URL('build/installer-art/', root), { recursive: true });
 for (const [name, [width, height, body]] of Object.entries(art)) {
   await page.setViewportSize({ width, height });
   await page.setContent(`<!doctype html><meta charset="utf-8"><style>*{margin:0;box-sizing:border-box}html,body{width:${width}px;height:${height}px;overflow:hidden}</style>${body}`);
-  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode())); });
   const png = await page.screenshot({ type: 'png' });
   writeFileSync(new URL(`build/installer-art/${name}.png`, root), png);
   // Canvas pixels -> bottom-up 24-bit BGR rows padded to 4 bytes.

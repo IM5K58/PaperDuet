@@ -435,12 +435,9 @@ class PyMuPDFParser:
                         table=None
                     item["en"]=html.escape(page.get_text("text",clip=region,sort=True))
                     if table:
-                        from .validation import suspicious_table, table_grid
+                        from .validation import table_grid
                         try: table_grid(table)
                         except ValueError: table=None
-                        # A merged or partial grid reads worse than the page image;
-                        # leave it to image restoration instead.
-                        if table and suspicious_table(table,item["en"]): table=None
                     item["table"]=table.model_dump(exclude_none=True) if table else None
                     item["needs_restore"]=True
                 excluded.extend([list(region),list(cap)])
@@ -512,8 +509,6 @@ class PyMuPDFParser:
             b=Block(id=f"b{len(blocks):04d}",doc_id=doc_id,order=len(blocks),section_path=path.copy(),**public)
             if item.get("crop"):
                 b.image_path=f"documents/{doc_id}/crops/{item['crop']}"
-            if b.type=='tab' and not b.table:
-                b.qa_flags=['EXTRACT_REVIEW']
             blocks.append(b)
             sources.append({"bbox":item["bbox"],"region":item.get("region"),"references":references,"needs_restore":item.get("needs_restore",False),"inferred_heading":item.get('inferred_heading',False)})
         # An unlabelled abstract is located by its first-page enclosing box.

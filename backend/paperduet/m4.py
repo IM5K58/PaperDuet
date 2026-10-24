@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from typing import Literal
 from urllib.parse import quote
@@ -12,7 +13,7 @@ from .storage import copy_storage
 
 class ArxivInput(Model):value:str=Field(min_length=1,max_length=300)
 class NoteInput(Model):
-    title:str=Field(default='발표 메모',min_length=1,max_length=300)
+    title:str=Field(default='메모',min_length=1,max_length=300)
     body_md:str=Field(default='',max_length=30000)
     block_id:str|None=None
     message_id:str|None=None
@@ -45,21 +46,26 @@ def register(app,store,pipeline,ask,registry):
         filename=doc_id+('-presentation' if format=='presentation' else '')+('.html' if format=='html' else '.md')
         return Response(body,media_type='text/html' if format=='html' else 'text/markdown',headers={'Content-Disposition':"attachment; filename*=UTF-8''"+quote(filename),'X-Content-Type-Options':'nosniff'})
 
+    # Keep the existing table and routes so previously saved notes remain available.
+    @app.get('/documents/{doc_id}/memos')
     @app.get('/documents/{doc_id}/presentation')
     def notes(doc_id:str):
         document(doc_id)
         with store.connect() as db:return [dict(r) for r in db.execute('SELECT * FROM presentation_notes WHERE doc_id=? ORDER BY sort_order,id',(doc_id,))]
 
+    @app.post('/documents/{doc_id}/memos')
     @app.post('/documents/{doc_id}/presentation')
     def add_note(doc_id:str,value:NoteInput):
         doc=document(doc_id);block=None
         if value.message_id:
             with store.connect() as db:
-                row=db.execute("SELECT m.content_md,t.block_id FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=? AND t.doc_id=? AND m.role='assistant' AND m.status='complete'",(value.message_id,doc_id)).fetchone()
+                row=db.execute("SELECT m.content_md,t.block_id,m.context_snapshot FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=? AND t.doc_id=? AND m.role='assistant' AND m.status='complete'",(value.message_id,doc_id)).fetchone()
                 existing=db.execute('SELECT * FROM presentation_notes WHERE doc_id=? AND message_id=?',(doc_id,value.message_id)).fetchone()
                 if existing:return dict(existing)
             if not row:raise HTTPException(422,'ANSWER_NOT_COMPLETE')
             value.body_md=row[0];value.block_id=row[1]
+            selection=json.loads(row[2]).get('context',{}).get('selection',{})
+            value.block_id=None if selection.get('field')=='document' else selection.get('block_id',value.block_id)
         if value.block_id:
             block=next((b for b in doc.blocks if b.id==value.block_id),None)
             if not block:raise HTTPException(422,'BLOCK_NOT_FOUND')
@@ -78,6 +84,7 @@ def register(app,store,pipeline,ask,registry):
             if len(value.ids)!=len(ids) or set(value.ids)!=ids:raise HTTPException(422,'NOTE_ORDER_INVALID')
             db.executemany('UPDATE presentation_notes SET sort_order=? WHERE id=? AND doc_id=?',[(i,id,doc_id) for i,id in enumerate(value.ids)])
 
+    @app.put('/documents/{doc_id}/memos/{note_id}',status_code=204)
     @app.put('/documents/{doc_id}/presentation/{note_id}',status_code=204)
     def edit_note(doc_id:str,note_id:str,value:NoteInput):
         if not value.body_md.strip():raise HTTPException(422,'NOTE_EMPTY')
@@ -85,6 +92,7 @@ def register(app,store,pipeline,ask,registry):
             if not db.execute('SELECT 1 FROM presentation_notes WHERE doc_id=? AND id=?',(doc_id,note_id)).fetchone():raise HTTPException(404,'NOTE_NOT_FOUND')
             db.execute('UPDATE presentation_notes SET title=?,body_md=?,updated_at=CURRENT_TIMESTAMP WHERE doc_id=? AND id=?',(registry.redact(value.title),registry.redact(value.body_md),doc_id,note_id))
 
+    @app.delete('/documents/{doc_id}/memos/{note_id}',status_code=204)
     @app.delete('/documents/{doc_id}/presentation/{note_id}',status_code=204)
     def delete_note(doc_id:str,note_id:str):
         with store.connect() as db:db.execute('DELETE FROM presentation_notes WHERE doc_id=? AND id=?',(doc_id,note_id))

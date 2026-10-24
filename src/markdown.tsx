@@ -2,6 +2,7 @@ import Markdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
+import { memo } from 'react';
 
 // Models often delimit math as \( … \) and \[ … \]; remark-math only knows $ and $$,
 // and Markdown would eat the backslashes, leaving raw "QW_i^Q" on screen.
@@ -12,7 +13,7 @@ export function normalizeMath(text:string) {
     .replace(/\\\(([\s\S]+?)\\\)/g,(_,math:string)=>`$${math.trim()}$`)).join('');
 }
 
-export function AnswerMarkdown({text}:{text:string}) {
+export const AnswerMarkdown = memo(function AnswerMarkdown({text}:{text:string}) {
   // strict:false: Korean words inside a formula (\text{손실} or not) render instead of turning red.
   return <div className="answer-markdown"><Markdown remarkPlugins={[remarkMath,remarkGfm]} rehypePlugins={[[rehypeKatex,{trust:false,strict:false,maxExpand:1000,maxSize:20}]]} skipHtml components={{a:({children})=><span>{children}</span>,img:()=>null}}>{normalizeMath(text)}</Markdown></div>;
-}
+});

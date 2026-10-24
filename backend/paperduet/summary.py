@@ -1,6 +1,6 @@
 """Paper summary and flow, made on request in two steps: one digest per
 top-level section, then one synthesis from the digests alone. Every point keeps
-its evidence blocks and gets the same number check as AI notes."""
+its source links without applying quality judgments."""
 import asyncio
 from fastapi import HTTPException
 from pydantic import Field
@@ -10,7 +10,6 @@ from .annotations import section_batches, source_text
 from .models import Model
 from .pipeline import AIRequest, compact, tracked
 from .provider import ProviderError
-from .validation import number_tokens
 
 FIELDS = ('problem', 'gap', 'method', 'results', 'limits')
 PER_FIELD, MAX_FLOW, MAX_VISUALS = 3, 16, 4
@@ -19,7 +18,7 @@ PER_FIELD, MAX_FLOW, MAX_VISUALS = 3, 16, 4
 class Point(Model):
     text: str = Field(min_length=1, max_length=2000)
     refs: list[str] = Field(default_factory=list, max_length=16)
-    flags: list[str] = Field(default_factory=list, max_length=4)  # V5: a number not in its evidence
+    flags: list[str] = Field(default_factory=list, max_length=4)  # Accepted for older clients; responses always clear it.
     edited: bool = False
 
 
@@ -70,10 +69,8 @@ def check_point(item, evidence):
         return None
     text = text_of(item.get('text'))
     refs = [r for r in dict.fromkeys(item.get('refs') or []) if isinstance(r, str) and r in evidence][:16]
-    if not text or not refs:
-        return None  # an unsupported statement is dropped, not shown
-    cited = ' '.join(source_text(evidence[r]) for r in refs)
-    return {'text': text, 'refs': refs, 'flags': ['V5'] if set(number_tokens(text)) - set(number_tokens(cited)) else []}
+    if not text:return None
+    return {'text': text, 'refs': refs, 'flags': []}
 
 
 def check_visuals(items, evidence, limit):
@@ -96,7 +93,7 @@ def parse_digest(value, evidence):
 
 def build_summary(value, evidence, sections):
     """The synthesis answer after the deterministic checks: refs must be paper
-    blocks, numbers must occur in them (else flagged), flow links must exist."""
+    blocks and flow links refer to existing content."""
     if not isinstance(value, dict):
         raise ValueError('SUMMARY_INVALID')
     structured = value.get('structured') if isinstance(value.get('structured'), dict) else {}
@@ -219,8 +216,7 @@ class Summarizer:
             self.store.save_summary(doc_id, status='failed', error='SUMMARY_FAILED')
 
     def save_edit(self, doc_id, value: Summary):
-        """The reader's own wording. Refs still have to be paper blocks; flags are
-        dropped for edited points (the reader vouches for them)."""
+        """Keep the reader's wording and source links without quality labels."""
         doc, evidence, _ = self.plan(doc_id)
         current = self.store.summary(doc_id)
         if not current or not current['payload']:
@@ -232,8 +228,7 @@ class Summarizer:
             points = []
             for p in payload['structured'][field]:
                 p['refs'] = [r for r in dict.fromkeys(p['refs']) if r in evidence]
-                if p['edited']:
-                    p['flags'] = []
+                p['flags'] = []
                 points.append(p)
             payload['structured'][field] = points
         for step in payload['flow']:

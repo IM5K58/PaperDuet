@@ -17,8 +17,6 @@ from .store import Store
 from .pipeline import BUSY, Pipeline
 from .provider import AnthropicProvider, ProviderError, WindowsVault
 from .adapter import inline
-from .validation import validate_block
-from .annotations import first_occurrences, validate_note
 from .providers import ProviderRegistry
 from .ask import AskService, AskInput, AskSettings
 
@@ -32,6 +30,9 @@ class ProviderInput(Model):
 class NoteInput(Model):
     message_id: str = Field(max_length=80)
     kind: Literal['key','res','lim','ins','mth','trm']
+
+class ThreadRename(Model):
+    title: str=Field(min_length=1,max_length=120)
 
 class OnboardingInput(Model):
     completed: bool=True
@@ -117,8 +118,8 @@ def create_app(token: str, data_dir: Path, fixture: Path,
         return {"status": "ok", "milestone": "M4"}
 
     @app.get("/documents")
-    def library():
-        return store.library()
+    def library(stats: bool=True):
+        return store.library(stats=stats)
 
     @app.post("/documents", status_code=202)
     async def upload(request: Request):
@@ -213,23 +214,18 @@ def create_app(token: str, data_dir: Path, fixture: Path,
             if not value.note or value.note.kind!=block.note.kind:
                 raise HTTPException(422,'INVALID_NOTE_EDIT')
             block.note=value.note.model_copy(update={'origin':'user'})
-            by_id={b.id:b for b in doc.blocks}
-            firsts=first_occurrences([b for b in doc.blocks if b.id in sources and not sources[b.id]['references']],doc.glossary)
-            block.qa_flags=validate_note(block,by_id,store.note_anchor(doc_id,block.id),firsts)
-            store.save_blocks(doc_id,[block]);pipeline.refresh_review(doc_id)
+            store.save_blocks(doc_id,[block]);pipeline.refresh_completion(doc_id)
             return block
         if value.note is not None:raise HTTPException(422,'INVALID_NOTE_EDIT')
         if value.ko is not None: block.ko=inline(value.ko)
         if value.caption_ko is not None: block.caption_ko=inline(value.caption_ko)
-        block.qa_flags=sorted(set([f for f in block.qa_flags if f in {'EXTRACT_REVIEW','ANNOTATE_REVIEW'}]+validate_block(block,sources[block_id]['block'],doc.glossary,False,job['checkpoint']['options']['min_ratio'])))
         store.save_blocks(doc_id,[block])
-        pipeline.refresh_review(doc_id)
+        pipeline.refresh_completion(doc_id)
         return block
 
     @app.get('/documents/{doc_id}/blocks/{block_id}/image')
     def image(doc_id: str,block_id: str):
-        doc=store.document(doc_id)
-        block=next((b for b in doc.blocks if b.id==block_id),None) if doc else None
+        block=store.block(doc_id,block_id)
         if not block or not block.image_path: raise HTTPException(404,'Image not found')
         path=store.asset_path(doc_id,block.image_path)
         if path is None or path.suffix!='.png':
@@ -312,9 +308,19 @@ def create_app(token: str, data_dir: Path, fixture: Path,
     def threads(doc_id: str):return ask.threads(doc_id)
 
     @app.get('/threads/{tid}')
-    def thread(tid: str):
-        try:return ask.thread(tid)
+    def thread(tid: str,compact: bool=False):
+        try:return ask.thread(tid,compact=compact)
         except ValueError:raise HTTPException(404,'THREAD_NOT_FOUND') from None
+
+    @app.get('/threads/{tid}/messages/{mid}/context')
+    def message_context(tid: str,mid: str):
+        try:return ask.message_context(tid,mid)
+        except ValueError:raise HTTPException(404,'MESSAGE_NOT_FOUND') from None
+
+    @app.patch('/threads/{tid}')
+    def rename_thread(tid: str,value: ThreadRename):
+        try:return ask.rename(tid,value.title)
+        except ValueError as error:raise HTTPException(404 if str(error)=='THREAD_NOT_FOUND' else 422,str(error)) from None
 
     @app.post('/threads/{tid}/save-as-note')
     def save_answer(tid: str,value: NoteInput):
@@ -322,9 +328,34 @@ def create_app(token: str, data_dir: Path, fixture: Path,
             thread=ask.thread(tid);job=store.job(thread['doc_id'])
             if job and job['status'] in BUSY:raise HTTPException(409,'JOB_BUSY')
             block=ask.save_note(tid,value.message_id,value.kind)
-            if job:pipeline.refresh_review(thread['doc_id'])
+            if job:pipeline.refresh_completion(thread['doc_id'])
             return block
         except ValueError as error:raise HTTPException(422,str(error)) from None
+
+    @app.get('/documents/{doc_id}/thumbnail')
+    async def thumbnail(doc_id: str):
+        with store.connect() as db:
+            row=db.execute('SELECT source_path FROM documents WHERE id=?',(doc_id,)).fetchone()
+        path=store.asset_path(doc_id,row['source_path']) if row and row['source_path'] else None
+        if path is None or path.suffix.lower()!='.pdf':raise HTTPException(404,'THUMBNAIL_NOT_FOUND')
+        def render():
+            import pymupdf as fitz
+            from .pdf_parser import PDF_LOCK
+            cached=path.with_name('thumbnail.png')
+            with PDF_LOCK:
+                if cached.is_file() and not cached.is_symlink() and cached.stat().st_mtime_ns>=path.stat().st_mtime_ns:
+                    return cached.read_bytes()
+                with fitz.open(path) as pdf:
+                    page=pdf[0];scale=300/page.rect.width
+                    data=page.get_pixmap(matrix=fitz.Matrix(scale,scale),alpha=False).tobytes('png')
+                # Replace atomically so simultaneous readers never see a partial PNG.
+                temporary=cached.with_suffix('.tmp')
+                temporary.write_bytes(data)
+                temporary.replace(cached)
+                return data
+        try:data=await asyncio.to_thread(render)
+        except (OSError,ValueError,RuntimeError,IndexError):raise HTTPException(404,'THUMBNAIL_NOT_FOUND') from None
+        return Response(data,media_type='image/png',headers={'Cache-Control':'private, max-age=3600'})
 
     @app.get('/documents/{doc_id}/pages/{page_number}/image')
     async def pdf_page(doc_id: str,page_number: int):

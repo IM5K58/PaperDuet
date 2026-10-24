@@ -1,13 +1,8 @@
 /* Ask panel, selection actions, image viewer, PDF preview and export controls. */
 .reader-block-wrap { position:relative; }
-.block-ask-actions { display:flex; justify-content:flex-end; gap:var(--s-xxs); margin:calc(-1 * var(--s-xxs)) 0 var(--s-xs); opacity:0; transition:opacity .12s; }
-.reader-block-wrap:hover .block-ask-actions,.reader-block-wrap:focus-within .block-ask-actions,.block-ask-actions:has(.thread-badge) { opacity:1; }
-.block-ask-actions button { display:inline-flex; align-items:center; gap:var(--s-xxs); min-height:var(--s-lg); padding:0 var(--s-sm); font-size:var(--t-caption); color:var(--text-muted); background:transparent; border-color:transparent; }
-.block-ask-actions button:hover { color:var(--primary); background:var(--accent-soft); }
-.block-ask-actions .icon { width:14px; height:14px; }
 .ai-answer-badge { font-size:var(--t-caption); font-weight:var(--w-strong); background:var(--canvas-soft); border-radius:var(--r-full); padding:2px var(--s-xs); }
-.selection-actions { position:fixed; bottom:var(--s-lg); left:50%; transform:translateX(-50%); z-index:70; background:var(--primary); border-radius:var(--r-md); display:flex; gap:var(--s-xxs); padding:var(--s-xxs); max-width:calc(100vw - var(--s-lg)); }
-.selection-actions button { white-space:nowrap; font-size:var(--t-label); color:var(--on-primary); background:transparent; border-color:transparent; }
+.selection-actions { position:fixed; z-index:70; background:var(--primary); border-radius:var(--r-sm); display:flex; gap:var(--s-xxs); padding:var(--s-xxs); max-width:calc(100vw - 16px); animation:pd-rise .12s ease-out; }
+.selection-actions button { min-height:var(--control-h-sm); padding:0 var(--s-sm); white-space:nowrap; font-size:var(--t-label); color:var(--on-primary); background:transparent; border-color:transparent; }
 .selection-actions button:hover { background:var(--primary-hover); }
 .selection-actions kbd { font:inherit; font-size:var(--t-caption); color:var(--text-faint); margin-left:var(--s-xxs); }
 
@@ -49,10 +44,6 @@
 .ask-composer .dialog-actions { margin:var(--s-xs) 0; }
 .context-debug { font-size:var(--t-label); }
 .context-debug pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--canvas-soft); border-radius:var(--r-sm); max-height:260px; overflow:auto; padding:var(--s-sm); }
-.ask-scrim { display:none; }
-.with-ask .shell { margin-right:440px; }
-.with-ask .paper-wrap { padding-left:var(--s-lg); padding-right:var(--s-lg); }
-.with-ask .reading-status { right:calc(440px + var(--s-lg)); }
 
 .image-viewer { width:min(1280px,96vw); max-width:96vw; height:90dvh; max-height:90dvh; padding:0; border:0; border-radius:var(--r-md); background:var(--canvas); color:var(--ink); overflow:hidden; }
 .image-viewer[open] { display:flex; flex-direction:column; }
@@ -82,24 +73,11 @@
 .note-editor input:not([type=checkbox]),.note-editor select { display:block; width:100%; min-width:0; margin-top:var(--s-xxs); }
 .note-validation-help { font-size:var(--t-label); color:var(--text-muted); }
 
-@media(min-width:1024px) and (max-width:1320px) {
-  .with-ask .toc { width:180px; }
-  .with-ask .shell { grid-template-columns:180px minmax(0,1fr); margin-right:400px; }
-  .with-ask .parallel { grid-template-columns:1fr; }
-  .with-ask .parallel .ko { border-top:1px solid var(--hairline-soft); padding-top:var(--s-sm); }
-  .with-ask .ask-panel { width:400px; }
-}
 @media(max-width:1023px) {
-  .ask-scrim { display:block; position:fixed; inset:0; background:var(--overlay); border:0; border-radius:0; z-index:89; }
   .ask-scrim:hover { background:var(--overlay); }
   .ask-panel { width:min(480px,100vw); border-left:0; }
-  .with-ask .shell { margin-right:0; }
-  .with-ask .paper-wrap { padding-left:var(--s-md); padding-right:var(--s-md); }
-  .with-ask .reading-status { right:var(--s-md); }
-  .block-ask-actions { opacity:1; }
   .ask-composer { max-height:44dvh; }
   .ask-panel>header { padding-top:var(--s-sm); }
-  .selection-actions { bottom:var(--s-md); }
   .selection-actions kbd { display:none; }
   .pdf-preview { width:calc(100vw - var(--s-sm)); height:calc(100dvh - var(--s-sm)); }
   .pdf-page-viewport { padding:var(--s-xxs); }

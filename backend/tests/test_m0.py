@@ -32,7 +32,7 @@ def test_adapter_preserves_all_blocks_and_stable_ids():
     for b in doc.blocks:
         if b.note:
             assert set(b.note.refs) <= ids
-            assert b.note.claim == "interpretation" and "V5" in b.qa_flags
+            assert b.note.claim == "interpretation" and not b.qa_flags
         if b.type == "fig":
             assert b.image_path is None
 

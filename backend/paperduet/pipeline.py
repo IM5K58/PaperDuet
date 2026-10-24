@@ -16,8 +16,8 @@ from .adapter import inline, parse_table, plain
 from .models import Model, PipelineOptions
 from .pdf_parser import PyMuPDFParser
 from .provider import ProviderError
-from .validation import number_tokens, numeric_locations, suspicious_table, table_grid, validate_block
-from .annotations import AnnotationBatch, first_occurrences, glossary_candidates, make_notes, section_batches, section_window, validate_note
+from .validation import table_grid, translation_complete
+from .annotations import AnnotationBatch, first_occurrences, glossary_candidates, make_notes, section_batches, section_window
 from .table_style import decorate_tables
 
 
@@ -130,9 +130,10 @@ def tracked(unit, done):
 
 
 def trusted_table(source):
-    """The PDF parser's own grid, when it can be believed. A suspicious grid is
-    restored from the page image instead and never used as the reference."""
-    return bool(source.table) and not suspicious_table(source.table,source.en or '')
+    if not source.table:return False
+    try:table_grid(source.table)
+    except ValueError:return False
+    return True
 
 
 class Pipeline:
@@ -182,23 +183,9 @@ class Pipeline:
             ids=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('queued','running','batch_waiting')")]
             finished=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('review','complete')")]
         for doc_id in finished:
-            self.flag_suspicious_tables(doc_id)
+            self.refresh_completion(doc_id)
         for doc_id in ids:
             self.start(doc_id)
-
-    def flag_suspicious_tables(self,doc_id):
-        """Papers processed before suspicious grids were detected: mark those tables
-        for review (the reader then shows the page image, and regenerating restores
-        the table from it). Idempotent."""
-        doc=self.store.document(doc_id)
-        if not doc:return
-        sources=self.store.sources(doc_id)
-        marked=[b for b in doc.blocks if b.type=='tab' and b.table and 'V4' not in b.qa_flags and b.id in sources
-                and suspicious_table(b.table,sources[b.id]['block'].en or '')]
-        for b in marked:b.qa_flags=sorted(set(b.qa_flags+['V4']))
-        if marked:
-            self.store.save_blocks(doc_id,marked)
-            self.refresh_review(doc_id)
 
     async def close(self):
         self.closing=True
@@ -508,8 +495,8 @@ class Pipeline:
         if units:self.store.update_job(doc_id,'Restore' if len(restored)<len(candidates) else 'Glossary','running',.3+.15*len(restored)/max(1,len(candidates)))
         if not await self.drive(doc_id,units,options) or self.paused(doc_id):return
         doc=self.store.document(doc_id)
-        translated=set(checkpoint.get('translated',[]))
         targets=[b for b in doc.blocks if b.id in sources and not sources[b.id]['references'] and (b.type in {'sec','sub','ssub','p','li'} or b.caption_en or b.table)]
+        translated={b.id for b in targets if translation_complete(b,sources[b.id]['block'])}
         batches=[];batch=[];length=0
         for b in targets:
             if b.id in translated: continue
@@ -519,7 +506,7 @@ class Pipeline:
             batch.append(b);length+=size
         if batch:batches.append(batch)
         def batch_translated(batch):
-            translated.update(b.id for b in batch)
+            translated.update(b.id for b in batch if translation_complete(b,sources[b.id]['block']))
             self.store.save_blocks(doc_id,batch)
             self.store.update_job(doc_id,'Translate','running',.5+.28*len(translated)/max(1,len(targets)),translated=sorted(translated),translated_count=len(translated),total_blocks=len(targets))
         if batches:self.store.update_job(doc_id,'Translate','running',.5+.28*len(translated)/max(1,len(targets)),translated_count=len(translated),total_blocks=len(targets))
@@ -537,21 +524,12 @@ class Pipeline:
         units=[tracked(self.annotate_unit(doc_id,key,batch,options),partial(section_annotated,key)) for key,batch in groups if key not in cached]
         if not await self.drive(doc_id,units,options) or self.paused(doc_id):return
         done=list(dict.fromkeys(done+['Annotate']))
-        self.store.update_job(doc_id,'Validate','running',.97)
         doc=self.store.document(doc_id)
-        by_id={b.id:b for b in doc.blocks}
-        firsts=first_occurrences([b for b in doc.blocks if b.id in sources and not sources[b.id]['references']],doc.glossary)
-        for b in doc.blocks:
-            if b.note:
-                b.qa_flags=sorted(set([f for f in b.qa_flags if f=='ANNOTATE_REVIEW']+validate_note(b,by_id,self.store.note_anchor(doc_id,b.id),firsts)))
-                continue
-            source=sources[b.id]
-            b.qa_flags=sorted(set([f for f in b.qa_flags if f in {'EXTRACT_REVIEW','ANNOTATE_REVIEW'}]+validate_block(b,source['block'],doc.glossary,source['references'],options.min_ratio)))
         decorate_tables(doc.blocks)
         self.store.save_blocks(doc_id,doc.blocks)
-        flags=sum(bool(b.qa_flags) for b in doc.blocks)
-        done=list(dict.fromkeys(done+['Translate','Validate','Render']))
-        self.store.update_job(doc_id,'Render','review' if flags else 'complete',1,completed_stages=done,review_count=flags,error=None)
+        done=list(dict.fromkeys([stage for stage in done if stage!='Validate']+['Translate','Render']))
+        self.store.update_job(doc_id,'Render','running',1,completed_stages=done,error=None)
+        self.refresh_completion(doc_id,finished=True)
         self.store.clear_ai_results(doc_id)
 
     def annotation_context(self,doc,batch,sources,extra_refs=()):
@@ -578,7 +556,8 @@ class Pipeline:
         payload,firsts,by_id=self.annotation_context(doc,batch,sources)
         notes=[];malformed=False;targets={b.id for b in batch}
         for attempt in range(2):
-            value=yield AIRequest(f'annotate:{key}:{attempt}','annotate',options.annotate_model,payload)
+            request=AIRequest(f'annotate:{key}:{attempt}','annotate',options.annotate_model,payload)
+            value=yield request
             if isinstance(value,ProviderError):
                 if str(value)!='AI_INVALID_JSON':raise value
                 malformed=True;break  # The transport already asked twice.
@@ -589,29 +568,9 @@ class Pipeline:
                 break
             except (ValueError,KeyError,TypeError):
                 malformed=True
+                self.store.discard_ai_result(doc_id,request.key)
                 payload={**payload,'validation_errors':{'section':['Invalid note schema or anchor; return the required JSON structure.']}}
-        failing=[(anchor,b) for anchor,b in notes if b.qa_flags]
-        if failing and not malformed:
-            # Repair only the flagged notes, with just their anchors and evidence.
-            anchors={anchor for anchor,_ in failing}
-            refs={r for _,b in failing for r in b.note.refs}-anchors
-            repair={'title':payload['title'],'glossary':payload['glossary'],
-                    'first_occurrences':{t:i for t,i in payload['first_occurrences'].items() if i in anchors},
-                    'target_blocks':[t for t in payload['target_blocks'] if t['id'] in anchors],
-                    'evidence_blocks':[compact(by_id[r],700) for r in sorted(refs) if r in by_id],
-                    'repair_notes':[{'after_block_id':anchor,**b.note.model_dump(exclude={'origin'}),'validation_errors':b.qa_flags} for anchor,b in failing]}
-            value=yield AIRequest(f'annotate:{key}:repair','annotate',options.annotate_model,repair)
-            if isinstance(value,ProviderError):
-                if str(value)!='AI_INVALID_JSON':raise value
-            else:
-                try:
-                    data=AnnotationBatch.model_validate(value)
-                    fixed={(anchor,b.note.kind):(anchor,b) for anchor,b in make_notes(doc_id,data.notes,anchors,by_id,firsts)}
-                    notes=[fixed.get((anchor,b.note.kind),(anchor,b)) if b.qa_flags else (anchor,b) for anchor,b in notes]
-                except (ValueError,KeyError,TypeError):
-                    pass  # Keep the flagged originals for manual review.
-        for b in batch:b.qa_flags=[f for f in b.qa_flags if f!='ANNOTATE_REVIEW']
-        if malformed:batch[0].qa_flags=sorted(set(batch[0].qa_flags+['ANNOTATE_REVIEW']))
+        if malformed:raise ProviderError('AI_INVALID_JSON')
         self.store.save_annotations(doc_id,key,notes,batch)
 
     @staticmethod
@@ -631,7 +590,6 @@ class Pipeline:
         batch=section_window(doc.blocks,sources,anchor)
         payload,firsts,by_id=self.annotation_context(doc,batch,sources,block.note.refs)
         payload['repair_note']={'after_block_id':anchor,**block.note.model_dump(exclude={'origin'})}
-        payload['validation_errors']=block.qa_flags
         for _ in range(2):
             try:
                 data=AnnotationBatch.model_validate(await self.call(doc.id,'annotate',options.annotate_model,payload))
@@ -639,14 +597,11 @@ class Pipeline:
                 if len(notes)!=1 or notes[0][1].note.kind!=block.note.kind:raise ValueError('Repair must preserve identity')
                 repaired=notes[0][1];repaired.id=block.id;repaired.order=block.order
                 block=repaired
-                if not block.qa_flags:break
-                payload['validation_errors']=block.qa_flags
-                payload['repair_note']={'after_block_id':anchor,**block.note.model_dump(exclude={'origin'})}
+                break
             except (ValueError,KeyError,TypeError):
-                block.qa_flags=sorted(set(block.qa_flags+['ANNOTATE_REVIEW']))
-            except ProviderError as error:
-                if str(error)!='AI_INVALID_JSON':raise
-                block.qa_flags=sorted(set(block.qa_flags+['ANNOTATE_REVIEW']));break
+                if _==1:raise ProviderError('AI_INVALID_JSON') from None
+            except ProviderError:
+                raise
         # Term repairs may relocate to the first occurrence; the note ID remains
         # stable so bookmarks (and later Ask AI threads) survive.
         self.store.save_repaired_note(doc.id,block,anchor)
@@ -654,27 +609,23 @@ class Pipeline:
 
     def restore_unit(self,doc_id,block,source,options):
         for attempt in range(2):
-            value=yield AIRequest(f'restore:{block.id}:{attempt}','table' if block.type=='tab' else 'equation',options.restore_model,
+            request=AIRequest(f'restore:{block.id}:{attempt}','table' if block.type=='tab' else 'equation',options.restore_model,
                 {'source_text':source.en or '', 'caption':source.caption_en or ''},self.store.data_dir/block.image_path)
+            value=yield request
             try:
                 if isinstance(value,ProviderError):raise ValueError(str(value))
                 if block.type=='tab':
                     recovered=parse_table(value['html']);table_grid(recovered)
-                    if trusted_table(source) and numeric_locations(recovered)!=numeric_locations(source.table):
-                        raise ValueError('Numeric cells changed')
-                    recovered_text=' '.join(c.text_en for row in recovered.header+recovered.body for c in row)
-                    if number_tokens(recovered_text)!=number_tokens(source.en or ''):
-                        raise ValueError('Source numeric tokens changed')
                     block.table=recovered
                 else:
                     latex=value.get('latex')
                     if not isinstance(latex,str) or not 0<len(latex)<20000:
                         raise ValueError('Invalid equation')
                     block.latex=latex
-                block.qa_flags=[f for f in block.qa_flags if f!='EXTRACT_REVIEW']
                 return
             except (ValueError,KeyError,TypeError):
-                block.qa_flags=list(set(block.qa_flags+['EXTRACT_REVIEW']))
+                self.store.discard_ai_result(doc_id,request.key)
+                if attempt==1:raise ProviderError('AI_INVALID_JSON') from None
 
     async def restore_block(self,doc_id,block,source,options):
         await self.drive(doc_id,[self.restore_unit(doc_id,block,source,options)],self.immediate(options),cache=False,pausable=False)
@@ -732,7 +683,7 @@ class Pipeline:
                             b.table.header[h.row][h.col].text_ko=inline(h.text_ko)
             except ValueError:
                 pass
-            pending=[b for b in pending if validate_block(b,sources[b.id]['block'],glossary,False,options.min_ratio)]
+            pending=[b for b in pending if not translation_complete(b,sources[b.id]['block'])]
             if not pending: break
 
     async def translate(self,doc_id,blocks,glossary,sources,options):
@@ -751,27 +702,31 @@ class Pipeline:
             options=PipelineOptions.model_validate(job['checkpoint']['options'])
             if block.note:
                 block=await self.regenerate_note(doc,block,options,sources)
-                self.refresh_review(doc_id)
+                self.refresh_completion(doc_id)
                 return block
-            if 'ANNOTATE_REVIEW' in block.qa_flags:
-                key,batch=next((key,batch) for key,batch in section_batches(doc.blocks,sources) if any(b.id==block.id for b in batch))
-                await self.annotate_section(doc_id,key,batch,options)
-                self.refresh_review(doc_id)
-                return next(b for b in self.store.document(doc_id).blocks if b.id==block_id)
             if block.type in {'eq','tab'} and block.image_path:
                 await self.restore_block(doc_id,block,sources[block_id]['block'],options)
             if block.type!='eq':
                 await self.translate(doc_id,[block],doc.glossary,sources,options)
-            block.qa_flags=sorted(set([f for f in block.qa_flags if f=='EXTRACT_REVIEW']+validate_block(block,sources[block_id]['block'],doc.glossary,False,options.min_ratio)))
             self.store.save_blocks(doc_id,[block])
             updated=self.store.document(doc_id)
             decorate_tables(updated.blocks)
             self.store.save_blocks(doc_id,[b for b in updated.blocks if b.table])
-            self.refresh_review(doc_id)
+            self.refresh_completion(doc_id)
             return block
 
-    def refresh_review(self,doc_id):
+    def refresh_completion(self,doc_id,finished=False):
         job=self.store.job(doc_id)
-        if job['status'] in {'review','complete'}:
-            count=sum(bool(b.qa_flags) for b in self.store.document(doc_id).blocks)
-            self.store.update_job(doc_id,'Render','review' if count else 'complete',1,review_count=count)
+        if not job:return
+        if not finished and job['status'] not in {'review','complete'} and not (
+            job['status']=='ready_to_translate' and 'Render' in job['checkpoint'].get('completed_stages',[])):
+            return
+        doc=self.store.document(doc_id);sources=self.store.sources(doc_id)
+        targets=[b for b in doc.blocks if b.id in sources and not sources[b.id]['references']
+                 and (b.type in {'sec','sub','ssub','p','li'} or b.caption_en or b.table)]
+        translated=[b.id for b in targets if translation_complete(b,sources[b.id]['block'])]
+        complete=len(translated)==len(targets)
+        self.store.update_job(doc_id,'Render','complete' if complete else 'ready_to_translate',
+            1 if complete else .5+.28*len(translated)/max(1,len(targets)),
+            translated=translated,translated_count=len(translated),total_blocks=len(targets),
+            untranslated_count=len(targets)-len(translated),error=None)

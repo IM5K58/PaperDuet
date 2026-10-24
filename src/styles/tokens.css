@@ -17,6 +17,15 @@
   --accent-soft: #e4eaf2;
   --pair: #f5f5f2;
   --overlay: rgba(24, 24, 27, .48);
+  /* Bookshelf surfaces from the approved shelf mockup. */
+  --paper: #fdfdfb;
+  --paper-ink: #2b2b30;
+  --ribbon: #b5412e;
+  --shelf-card: #18181b;
+  --shelf-ink: #f4f4f5;
+  --shelf-muted: #a1a1aa;
+  --shadow-float: 0 8px 28px rgba(24,24,27,.10), 0 1px 3px rgba(24,24,27,.06);
+  --cover-shadow: 0 1px 2px rgba(24,24,27,.08), 0 6px 16px rgba(24,24,27,.08);
 
   /* Pills only for chips, badges, dots and progress bars. */
   --r-none: 0;
@@ -94,6 +103,14 @@
   --accent-soft: #26303d;
   --pair: #1e1e21;
   --overlay: rgba(0, 0, 0, .6);
+  --paper: #e9e9e4;
+  --paper-ink: #2b2b30;
+  --ribbon: #b5412e;
+  --shelf-card: #232327;
+  --shelf-ink: #ededef;
+  --shelf-muted: #9e9ea6;
+  --shadow-float: 0 8px 28px rgba(0,0,0,.45);
+  --cover-shadow: 0 6px 18px rgba(0,0,0,.45);
   --key-bg: #2e2717; --key-bd: #e0b84a; --key-ink: #f2d98a;
   --res-bg: #1b2a21; --res-bd: #62c08a; --res-ink: #9ce3b5;
   --lim-bg: #301d19; --lim-bd: #e97e6a; --lim-ink: #f5b0a3;
@@ -121,6 +138,14 @@
     --accent-soft: #26303d;
     --pair: #1e1e21;
     --overlay: rgba(0, 0, 0, .6);
+    --paper: #e9e9e4;
+    --paper-ink: #2b2b30;
+    --ribbon: #b5412e;
+    --shelf-card: #232327;
+    --shelf-ink: #ededef;
+    --shelf-muted: #9e9ea6;
+    --shadow-float: 0 8px 28px rgba(0,0,0,.45);
+    --cover-shadow: 0 6px 18px rgba(0,0,0,.45);
     --key-bg: #2e2717; --key-bd: #e0b84a; --key-ink: #f2d98a;
     --res-bg: #1b2a21; --res-bd: #62c08a; --res-ink: #9ce3b5;
     --lim-bg: #301d19; --lim-bd: #e97e6a; --lim-ink: #f5b0a3;

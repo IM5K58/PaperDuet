@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Model(BaseModel):
@@ -56,6 +56,13 @@ class Block(Model):
     note: Note | None = None
     qa_flags: list[str] = Field(default_factory=list)
 
+    @field_validator('qa_flags', mode='before')
+    @classmethod
+    def ignore_legacy_review_flags(cls, value):
+        # Older databases/clients may still send this field. It no longer
+        # classifies content or changes its processing state.
+        return []
+
 
 class ReadingPosition(Model):
     block_id: str | None = None
@@ -74,6 +81,8 @@ class Document(Model):
     reading_position: ReadingPosition = Field(default_factory=ReadingPosition)
     page_count: int = 0
     authors: str = ""
+    translated_count: int = 0
+    untranslated_count: int = 0
     glossary: list[dict] = Field(default_factory=list)
 
 
@@ -84,7 +93,7 @@ class PipelineOptions(Model):
     translate_model: str = Field(default="claude-haiku-4-5", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.:-]+$")
     restore_model: str = Field(default="claude-sonnet-5", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.:-]+$")
     annotate_model: str = Field(default="claude-sonnet-5", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_.:-]+$")
-    min_ratio: float = Field(default=0.25, ge=0.05, le=1, allow_inf_nan=False)
+    min_ratio: float = Field(default=0.25, allow_inf_nan=False)  # Legacy options; unused.
     # Saving mode: the provider's batch API at half price, answers within 24 h.
     # Chosen per job; never stored as the default (see Pipeline.approve).
     batch: bool = False

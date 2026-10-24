@@ -21,9 +21,13 @@ from fastapi.testclient import TestClient
 
 from paperduet.adapter import plain
 from paperduet.app import create_app
-from paperduet.validation import number_tokens
 from paperduet.exports import table_html
 from paperduet.models import PipelineOptions
+
+def number_tokens(text):
+    # Test transport: synthesize numeric content when generating fixture output.
+    return Counter(re.findall(r"(?<![\w.])[+−-]?\d+(?:[.,]\d+)*%?",plain(text)))
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / 'fixtures/rex-omni.blocks.json'

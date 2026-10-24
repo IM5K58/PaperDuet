@@ -2,7 +2,7 @@
 
 The fixture has Korean-only table captions/headers, no figure images, and no
 note evidence metadata. Do not manufacture missing English text or images.
-Note refs are local candidates, never verified evidence: mark V5 for review.
+Note refs point to local source blocks.
 """
 import json
 import re
@@ -110,7 +110,6 @@ def adapt_fixture(path: Path) -> Document:
             block.note = Note(kind=item["k"], title=item["h"],
                               body_md=markdownify(item["b"], heading_style="ATX").strip(),
                               claim="interpretation", refs=refs, origin="generated")
-            block.qa_flags = ["V5"]
         blocks.append(block)
         if kind != "note":
             previous = block.id

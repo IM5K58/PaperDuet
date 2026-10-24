@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { request } from './api';
 import { Icon } from './icons';
+import { useDialogDismissal } from './dialog-dismiss';
 import type { ConnectionMode, PipelineOptions, Provider } from './types';
 
 export const DEFAULTS:PipelineOptions={provider:'anthropic',mode:'api_key',glossary_model:'claude-sonnet-5',translate_model:'claude-haiku-4-5',restore_model:'claude-sonnet-5',annotate_model:'claude-sonnet-5',min_ratio:.25};
@@ -21,8 +22,9 @@ export function ModelSelect({provider,mode,value,onChange,label,disabled,listId}
 
 export function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {
   const ref=useRef<HTMLDialogElement>(null);
+  const dismiss=useDialogDismissal(onClose);
   useEffect(()=>{const dialog=ref.current;const opener=document.activeElement as HTMLElement|null;dialog?.showModal();return()=>{dialog?.close();opener?.focus({preventScroll:true});};},[]);
-  return <dialog ref={ref} aria-label={title} className="workspace-dialog" onCancel={e=>{e.preventDefault();onClose();}}><header><h2>{title}</h2><button onClick={onClose} aria-label="창 닫기"><Icon name="close"/></button></header>{children}</dialog>;
+  return <dialog ref={ref} {...dismiss} aria-label={title} className="workspace-dialog" onCancel={e=>{e.preventDefault();onClose();}}><header><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="창 닫기"><Icon name="close"/></button></header>{children}</dialog>;
 }
 
 export function ConnectionChoices({provider,mode,onChange,cliEnabled=true}:{provider:Provider;mode:ConnectionMode;onChange:(p:Provider,m:ConnectionMode)=>void;cliEnabled?:boolean}) {
@@ -30,7 +32,7 @@ export function ConnectionChoices({provider,mode,onChange,cliEnabled=true}:{prov
 }
 
 export function ModelChoices({options,setOptions}:{options:PipelineOptions;setOptions:(value:PipelineOptions)=>void}) {
-  return <><ConnectionChoices provider={options.provider??'anthropic'} mode={options.mode??'api_key'} onChange={(provider,mode)=>{const model=defaultModel(provider,mode);setOptions({...options,provider,mode,glossary_model:model,restore_model:model,translate_model:model,annotate_model:model});}}/><div className="model-choices">{([['restore_model','표·수식 복원'],['glossary_model','용어집'],['translate_model','전문 번역'],['annotate_model','맥락 주석']] as const).map(([key,label])=><label key={key}>{label}<ModelSelect key={`${options.provider}-${options.mode}`} listId="provider-models" label={`${label} 모델`} provider={options.provider??'anthropic'} mode={options.mode??'api_key'} value={options[key]} onChange={value=>setOptions({...options,[key]:value})}/></label>)}<label>요약 의심 기준 (번역/원문 길이)<input type="number" min={.05} max={1} step={.05} value={options.min_ratio} onChange={e=>setOptions({...options,min_ratio:Number(e.target.value)})}/></label></div></>;
+  return <><ConnectionChoices provider={options.provider??'anthropic'} mode={options.mode??'api_key'} onChange={(provider,mode)=>{const model=defaultModel(provider,mode);setOptions({...options,provider,mode,glossary_model:model,restore_model:model,translate_model:model,annotate_model:model});}}/><div className="model-choices">{([['restore_model','표·수식 복원'],['glossary_model','용어집'],['translate_model','전문 번역'],['annotate_model','맥락 주석']] as const).map(([key,label])=><label key={key}>{label}<ModelSelect key={`${options.provider}-${options.mode}`} listId="provider-models" label={`${label} 모델`} provider={options.provider??'anthropic'} mode={options.mode??'api_key'} value={options[key]} onChange={value=>setOptions({...options,[key]:value})}/></label>)}</div></>;
 }
 
 type Health={status:string;models:{id:string;name:string}[];version?:string;path?:string;stream_granularity?:string};

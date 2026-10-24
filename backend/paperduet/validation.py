@@ -4,12 +4,7 @@ from collections import Counter
 from .adapter import plain
 from .models import Block, Table
 
-NUMBERS = re.compile(r"(?<![\w.])[+−-]?\d+(?:[.,]\d+)*%?")
 NUMERIC_CELL = re.compile(r"[+−-]?\d+(?:[.,]\d+)*%?")
-
-
-def number_tokens(text: str):
-    return Counter(NUMBERS.findall(plain(text)))
 
 
 def table_grid(table: Table):
@@ -48,52 +43,16 @@ def numeric_locations(table: Table):
             if r>=len(table.header) and NUMERIC_CELL.fullmatch(plain(value).strip())}
 
 
-def suspicious_table(table: Table, source_text: str = '') -> bool:
-    """A grid can be well-formed and still wrong. PDF table detection sometimes
-    grids only part of a table (e.g. its shaded columns) and pours the rest into
-    one cell, or drops rows. Distrust grids where one cell holds a large share of
-    the numbers, or whose cells hold clearly fewer numbers than the region's text."""
-    counts = [sum(number_tokens(c.text_en).values()) for row in table.header + table.body for c in row]
-    total = sum(counts)
-    if total >= 12 and max(counts) > max(6, total * .25):
-        return True
-    expected = sum(number_tokens(source_text).values()) if source_text else 0
-    return expected >= 12 and total < expected * .8
-
-
-def validate_block(block: Block, source: Block, glossary: list[dict], references=False, ratio=.25):
-    flags=[]
-    if references:
-        return flags
-    pairs=[]
-    if block.type in {"sec","sub","ssub","p","li"} and source.en:
-        pairs.append((source.en,block.ko or ""))
-    if source.caption_en:
-        pairs.append((source.caption_en,block.caption_ko or ""))
-    if block.table:
-        try:
-            table_grid(block.table)
-            if suspicious_table(block.table, source.en or ""):
-                flags.append("V4")
-            elif source.table and not suspicious_table(source.table, source.en or "") and numeric_locations(block.table)!=numeric_locations(source.table):
-                flags.append("V4")
-        except ValueError:
-            flags.append("V4")
-        for row in block.table.header:
-            for c in row:
-                if not c.numeric and plain(c.text_en).strip():
-                    pairs.append((c.text_en,c.text_ko or ""))
-    for en,ko in pairs:
-        en,ko=plain(en).strip(),plain(ko).strip()
-        if not ko:
-            flags.append("V1")
-            continue
-        if len(ko)/max(1,len(en)) < ratio:
-            flags.append("V2")
-        if set(number_tokens(en))-set(number_tokens(ko)):
-            flags.append("V3")
-        for term in glossary:
-            pattern=r"(?<!\w)"+re.escape(term["term"])+r"(?!\w)"
-            if re.search(pattern,en,re.I) and term["ko"].casefold() not in ko.casefold():
-                flags.append("V6")
-    return sorted(set(flags))
+def translation_complete(block: Block, source: Block | None = None) -> bool:
+    """Completion means text exists. Length, numbers and terminology do not
+    classify a translation or cause another paid request."""
+    source = source or block
+    present = lambda value: bool(plain(value or '').strip())
+    if block.type in {'sec','sub','ssub','p','li'} and present(source.en) and not present(block.ko):
+        return False
+    if present(source.caption_en) and not present(block.caption_ko):
+        return False
+    if block.table and any(not cell.numeric and present(cell.text_en) and not present(cell.text_ko)
+                           for row in block.table.header for cell in row):
+        return False
+    return True

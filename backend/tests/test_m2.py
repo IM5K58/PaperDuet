@@ -6,7 +6,7 @@ import sqlite3
 from fastapi.testclient import TestClient
 
 from paperduet.app import create_app
-from paperduet.annotations import first_occurrences, validate_note
+from paperduet.annotations import first_occurrences
 from paperduet.models import Block, Note, PipelineOptions, ReadingPosition
 from paperduet.pipeline import Pipeline
 from paperduet.store import Store
@@ -47,10 +47,11 @@ def test_m1_upgrade_annotates_all_six_kinds_without_retranslation_and_persists(t
     assert len(provider.calls)==before and store.document(doc_id).blocks==doc.blocks
 
 
-def test_v5_failure_visible_regeneration_and_manual_edit_resolve_without_id_change(tmp_path):
+def test_note_numbers_do_not_trigger_review_or_automatic_repairs_and_edits_persist(tmp_path):
     store,doc_id=seed(tmp_path);provider=SampleProvider(bad=True);run(store,doc_id,provider)
     bad=next(b for b in store.document(doc_id).blocks if b.note and b.note.kind=='res')
-    assert bad.qa_flags==['V5'] and store.job(doc_id)['status']=='review'
+    assert not bad.qa_flags and store.job(doc_id)['status']=='complete'
+    assert len(provider.calls)==2 and not any('repair_notes' in payload for _,payload in provider.calls)
     token=secrets.token_hex(32);app=create_app(token,tmp_path,FIXTURE,vault=MemoryVault(),provider=provider)
     with TestClient(app,headers={'Authorization':'Bearer '+token}) as client:
         endpoint=f'/documents/{doc_id}/blocks/{bad.id}'
@@ -58,8 +59,8 @@ def test_v5_failure_visible_regeneration_and_manual_edit_resolve_without_id_chan
         assert repaired.status_code==200,repaired.text
         assert repaired.json()['id']==bad.id and not repaired.json()['qa_flags']
         note=repaired.json()['note'];note['body_md']='숫자 99999는 근거에 없다.'
-        result=client.patch(endpoint,json={'note':note});assert result.json()['qa_flags']==['V5']
-        assert client.get(f'/documents/{doc_id}/job').json()['checkpoint']['review_count']==1
+        result=client.patch(endpoint,json={'note':note});assert result.json()['qa_flags']==[]
+        assert 'review_count' not in client.get(f'/documents/{doc_id}/job').json()['checkpoint']
         note['body_md']='결과는 42.0이다.'
         fixed=client.patch(endpoint,json={'note':note}).json()
         assert fixed['note']['origin']=='user' and fixed['qa_flags']==[]
@@ -82,40 +83,53 @@ def test_annotation_resume_uses_atomic_section_cache_after_rate_limit(tmp_path):
     assert [b.model_dump() for b in store.document(doc_id).blocks if b.note and b.section_path==['Abstract']]==oldnotes
 
 
-def test_malformed_annotations_flag_anchor_and_section_retry_recovers(tmp_path):
+def test_malformed_annotation_response_is_an_error_and_resume_retries_only_missing_work(tmp_path):
     store,doc_id=seed(tmp_path);provider=SampleProvider();provider.malformed=True
     pipeline=run(store,doc_id,provider)
-    assert store.job(doc_id)['status']=='review'
-    assert len(provider.calls)==4
-    flagged=[b for b in store.document(doc_id).blocks if 'ANNOTATE_REVIEW' in b.qa_flags]
-    assert len(flagged)==2
+    assert store.job(doc_id)['status']=='paused'
+    assert store.job(doc_id)['checkpoint']['error']=='AI_INVALID_JSON'
+    assert len(provider.calls)==2
+    assert not any(b.qa_flags for b in store.document(doc_id).blocks)
     provider.malformed=False
-    for block in flagged:asyncio.run(pipeline.regenerate(doc_id,block.id))
+    run(store,doc_id,provider)
     assert store.job(doc_id)['status']=='complete'
     assert len([b for b in store.document(doc_id).blocks if b.note])==6
 
 
-def test_invalid_json_after_transport_retry_is_reviewable_and_usage_recorded(tmp_path):
+def test_invalid_json_is_a_request_error_and_usage_is_recorded(tmp_path):
     store,doc_id=seed(tmp_path);provider=SampleProvider();provider.invalid_json=True
     run(store,doc_id,provider)
-    job=store.job(doc_id);assert job['status']=='review'
-    assert sum(u['tokens_in'] for u in job['usage'])==40
+    job=store.job(doc_id);assert job['status']=='paused'
+    assert job['checkpoint']['error']=='AI_INVALID_JSON'
+    assert sum(u['tokens_in'] for u in job['usage'])==20
 
 
-def test_v5_calculation_scope_missing_refs_first_use_and_equation_format(tmp_path):
-    store,doc_id=seed(tmp_path);doc=store.document(doc_id);by_id={b.id:b for b in doc.blocks}
-    firsts=first_occurrences(doc.blocks,doc.glossary)
-    note=Block(id='n',doc_id=doc_id,order=0,type='note',section_path=[],note=Note(kind='res',title='결과',body_md='결과는 42.0이다.\n\n계산값: 84.0 = 42.0 × 2 (두 번 합산).',claim='mixed',refs=['b0001'],origin='generated'))
-    assert not validate_note(note,by_id,'b0001',firsts)
-    note.note.body_md+='\n\n근거 없는 12345.'
-    assert validate_note(note,by_id,'b0001',firsts)==['V5']
-    note.note.body_md='결과는 42.0이다.';note.note.refs=['missing']
-    assert validate_note(note,by_id,'b0001',firsts)==['V5']
-    note.note.refs=['b0001'];note.note.kind='trm';note.note.title='Nova'
-    assert validate_note(note,by_id,'b0001',firsts)==[]
-    assert validate_note(note,by_id,'b0005',firsts)==['NOTE_TERM']
-    note.note.kind='mth';note.note.title='식';note.note.refs=['b0004']
-    assert validate_note(note,by_id,'b0004',firsts)==['NOTE_MATH']
+def test_missing_translation_can_resume_without_retranslating_short_or_changed_text(tmp_path):
+    store,doc_id=seed(tmp_path)
+    block=next(b for b in store.document(doc_id).blocks if b.id=='b0001');block.ko=''
+    store.save_blocks(doc_id,[block])
+    class Translator(SampleProvider):
+        def __init__(self):super().__init__();self.empty=True
+        async def json(self,stage,model,payload,image=None):
+            if stage!='translate':return await super().json(stage,model,payload,image)
+            self.calls.append((stage,payload))
+            return {'blocks':[{'id':b['id'],'ko':'' if self.empty else '끝'} for b in payload['blocks']]},{}
+    provider=Translator();run(store,doc_id,provider)
+    job=store.job(doc_id)
+    assert job['status']=='ready_to_translate' and job['checkpoint']['untranslated_count']==1
+    assert store.document(doc_id).untranslated_count==1
+    provider.empty=False;before=len(provider.calls);run(store,doc_id,provider)
+    calls=provider.calls[before:]
+    assert len(calls)==1 and calls[0][0]=='translate'
+    assert [b['id'] for b in calls[0][1]['blocks']]==['b0001']
+    assert store.job(doc_id)['status']=='complete' and store.document(doc_id).untranslated_count==0
+    assert not any(b.qa_flags for b in store.document(doc_id).blocks)
+
+
+def test_legacy_flags_are_ignored_without_changing_saved_content():
+    block=Block(id='n',doc_id='d',order=0,type='note',section_path=[],qa_flags=['V5','NOTE_MATH','NOTE_TERM'],
+        note=Note(kind='mth',title='계산',body_md='자유롭게 정리한 숫자 99999.',claim='mixed',refs=['missing'],origin='user'))
+    assert block.qa_flags==[] and block.note.body_md=='자유롭게 정리한 숫자 99999.'
 
 
 def test_table_model_rows_maxima_ties_rowspans_and_source_unchanged(tmp_path):
@@ -142,7 +156,7 @@ def test_v2_database_migration_preserves_existing_m1_doc_and_position(tmp_path):
     store=Store(tmp_path,FIXTURE)
     assert store.document('old').reading_position.offset==19
     assert store.pipeline_options().translate_model=='custom-model' and store.pipeline_options().annotate_model=='claude-sonnet-5'
-    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==8
+    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==9
 
 
 def test_term_regeneration_relocates_to_first_use_preserving_note_id(tmp_path):

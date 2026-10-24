@@ -1,4 +1,4 @@
-"""Section annotation contracts and deterministic evidence checks (not fact checking)."""
+"""Section annotation contracts and stable block anchors."""
 import hashlib
 import re
 
@@ -6,7 +6,6 @@ from pydantic import Field
 
 from .adapter import plain
 from .models import Block, Model, Note
-from .validation import number_tokens
 
 
 class Candidate(Note):
@@ -86,25 +85,6 @@ def glossary_candidates(texts,limit=150):
     return [[term,n] for term,n in ranked[:limit]]
 
 
-def validate_note(block,by_id,anchor,firsts):
-    note=block.note
-    if not note:return []
-    flags=[]
-    refs=[by_id[r] for r in note.refs if r in by_id and not by_id[r].note]
-    if len(refs)!=len(set(note.refs)) or not refs:flags.append('V5')
-    # A marker excuses only its own calculation paragraph, not the whole note.
-    text=re.sub(r'(?m)^\s*(?:[-*] )?(?:\*\*)?계산값(?:\*\*)?\s*[:：][^\n]*','',note.body_md)
-    text=re.sub(r'(?m)^\s*\d+[.)]\s+','',text)
-    if set(number_tokens(note.title+' '+text))-set(number_tokens(' '.join(source_text(b) for b in refs))):flags.append('V5')
-    if note.kind=='mth':
-        if not any(b.type=='eq' for b in refs) or by_id.get(anchor) is None or by_id[anchor].type!='eq' or not all(label in note.body_md for label in ['식이 하는 일','기호별 의미','식이 의미하는 바']):
-            flags.append('NOTE_MATH')
-    if note.kind=='trm':
-        term=next((term for term in firsts if term.casefold()==note.title.strip().casefold()),None)
-        if term is None or firsts[term]!=anchor:flags.append('NOTE_TERM')
-    return sorted(set(flags))
-
-
 def make_notes(doc_id,candidates,targets,by_id,firsts):
     result=[];seen=set()
     for item in candidates:
@@ -115,6 +95,5 @@ def make_notes(doc_id,candidates,targets,by_id,firsts):
         identity=hashlib.sha256((item.after_block_id+'|'+item.kind).encode()).hexdigest()[:20]
         note=Note(**item.model_dump(exclude={'after_block_id','origin'}),origin='generated')
         block=Block(id='n'+identity,doc_id=doc_id,order=0,type='note',section_path=anchor.section_path,page=anchor.page,note=note)
-        block.qa_flags=validate_note(block,by_id,anchor.id,firsts)
         result.append((anchor.id,block))
     return result

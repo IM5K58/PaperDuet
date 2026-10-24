@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .adapter import adapt_fixture
 from .models import Block, Document, PipelineOptions, ReaderSettings, ReadingPosition
+from .validation import translation_complete
 
 
 class Store:
@@ -16,7 +17,7 @@ class Store:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 8:
+            if version > 9:
                 raise RuntimeError("Database version is newer than this app")
             if version == 0:
                 db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
@@ -34,6 +35,8 @@ class Store:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_7.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             if version < 8:
                 db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_8.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
+            if version < 9:
+                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_9.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             # The sample paper is optional: it is not published with the source,
             # and a user who deleted it does not get it back on the next start.
             if fixture.is_file() and not db.execute("SELECT 1 FROM documents WHERE id='rex-omni'").fetchone() \
@@ -79,10 +82,17 @@ class Store:
             if row['status']!='fixture':
                 from .table_style import decorate_tables
                 decorate_tables(blocks)  # Existing M1 documents also work offline.
+            references={r['block_id'] for r in db.execute('SELECT block_id,provenance FROM source_blocks WHERE doc_id=?',(doc_id,))
+                        if json.loads(r['provenance']).get('references')}
+            targets=[b for b in blocks if not b.note and b.id not in references
+                     and not any(p.lower() in {'references','bibliography'} for p in b.section_path)
+                     and (b.type in {'sec','sub','ssub','p','li'} or b.caption_en or b.table)]
+            translated=sum(translation_complete(b) for b in targets)
             return Document(id=row["id"], title=row["title"], title_ko=row["title_ko"],
                             source_kind=row['source_kind'],source_url=row['source_url'],
                             arxiv_id=row["arxiv_id"] or "", status=row["status"], blocks=blocks,
                             page_count=row["page_count"], authors=row["authors"],
+                            translated_count=translated,untranslated_count=len(targets)-translated,
                             glossary=[dict(g) for g in db.execute("SELECT term,ko,keep_english,definition_ko FROM glossary WHERE doc_id=? ORDER BY term", (doc_id,))],
                             reading_position=ReadingPosition(block_id=row["last_block_id"], offset=row["last_offset"]))
 
@@ -106,11 +116,27 @@ class Store:
             db.execute("INSERT INTO reader_settings VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET payload=excluded.payload",
                        (settings.model_dump_json(),))
 
-    def library(self):
+    def block(self, doc_id: str, block_id: str) -> Block | None:
         with self.connect() as db:
-            return [dict(r) for r in db.execute("""SELECT d.id,d.title,d.status,d.page_count,d.created_at,d.opened_at,
-                (SELECT COUNT(*) FROM blocks b WHERE b.doc_id=d.id) AS block_count
-                FROM documents d ORDER BY COALESCE(opened_at,created_at) DESC,id""")]
+            row=db.execute('SELECT payload FROM blocks WHERE doc_id=? AND id=?',(doc_id,block_id)).fetchone()
+            return Block.model_validate_json(row[0]) if row else None
+
+    def library(self, stats=True):
+        with self.connect() as db:
+            if not stats:
+                return [dict(r) for r in db.execute('''SELECT d.id,d.title,d.status,j.status AS job_status,j.stage,j.progress
+                    FROM documents d LEFT JOIN jobs j ON j.rowid=(
+                        SELECT rowid FROM jobs WHERE doc_id=d.id ORDER BY rowid DESC LIMIT 1)
+                    ORDER BY d.id''')]
+            return [dict(r,has_thumbnail=bool(r['has_thumbnail']),read_percent=int(r['read_percent'])) for r in db.execute("""WITH totals AS (SELECT doc_id,COUNT(*) AS total FROM blocks GROUP BY doc_id)
+                SELECT d.id,d.title,d.status,d.page_count,d.created_at,d.opened_at,
+                    COALESCE(t.total,0) AS block_count,
+                    json_extract(p.payload,'$.page') AS last_page,
+                    COALESCE(ROUND(100.0*(SELECT COUNT(*) FROM blocks b WHERE b.doc_id=d.id AND b.sort_order<=p.sort_order)/NULLIF(t.total,0)),0) AS read_percent,
+                    CASE WHEN lower(d.source_path) LIKE '%.pdf' THEN 1 ELSE 0 END AS has_thumbnail
+                FROM documents d LEFT JOIN blocks p ON p.doc_id=d.id AND p.id=d.last_block_id
+                    LEFT JOIN totals t ON t.doc_id=d.id
+                ORDER BY COALESCE(d.opened_at,d.created_at) DESC,d.id""")]
 
     def delete_document(self, doc_id: str) -> bool:
         """Blocks, sources, glossary, job, usage, conversations, notes and
@@ -133,6 +159,9 @@ class Store:
                 return None
             result = dict(row)
             result["payload"] = json.loads(row["payload"]) if row["payload"] else None
+            if result['payload']:
+                for points in result['payload'].get('structured',{}).values():
+                    for point in points:point['flags']=[]
             result["edited"] = bool(row["edited"])
             return result
 
@@ -162,6 +191,10 @@ class Store:
         with self.connect() as db:
             db.execute("DELETE FROM ai_results WHERE doc_id=?", (doc_id,))
 
+    def discard_ai_result(self, doc_id: str, key: str):
+        with self.connect() as db:
+            db.execute('DELETE FROM ai_results WHERE doc_id=? AND key=?',(doc_id,key))
+
     def job(self, doc_id: str):
         with self.connect() as db:
             row = db.execute("SELECT * FROM jobs WHERE doc_id=? ORDER BY rowid DESC LIMIT 1", (doc_id,)).fetchone()
@@ -169,6 +202,7 @@ class Store:
                 return None
             result = dict(row)
             result["checkpoint"] = json.loads(row["checkpoint"] or "{}")
+            result["checkpoint"].pop("review_count",None)
             result["usage"] = [dict(r) for r in db.execute("SELECT stage,model,SUM(tokens_in) AS tokens_in,SUM(tokens_out) AS tokens_out,SUM(cache_read) AS cache_read,SUM(cache_write) AS cache_write,SUM(requests) AS requests,COUNT(*) AS calls,batch FROM ai_usage WHERE doc_id=? GROUP BY stage,model,batch", (doc_id,))]
             return result
 
@@ -179,6 +213,7 @@ class Store:
             saved = json.loads(row[0] or "{}") if row else {}
             if row and row[1] == 'paused' and status != 'queued':
                 status = 'paused'
+            saved.pop("review_count",None)
             saved.update(checkpoint)
             db.execute("UPDATE jobs SET stage=?,status=?,progress=?,checkpoint=?,updated_at=CURRENT_TIMESTAMP WHERE doc_id=?",
                        (stage, status, progress, json.dumps(saved, ensure_ascii=False), doc_id))

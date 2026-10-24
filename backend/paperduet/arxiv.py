@@ -165,8 +165,7 @@ class ArxivImporter:
                                 try:
                                     await asyncio.to_thread(raster_figure,rasters,stage/'crops'/f'{bid}.png')
                                     block.image_path=f'documents/{doc_id}/crops/{bid}.png'
-                                except Exception:block.qa_flags.append('EXTRACT_REVIEW')
-                            else:block.qa_flags.append('EXTRACT_REVIEW')
+                                except Exception:pass
                     atomic_json(stage/'metadata.json',meta)
                     target=self.store.data_dir/'documents'/doc_id;target.parent.mkdir(exist_ok=True)
                     if target.exists():raise ValueError('ARXIV_ALREADY_EXISTS')

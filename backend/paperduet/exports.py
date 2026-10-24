@@ -61,7 +61,7 @@ def html_export(store,doc,redact):
 
 def presentation_export(store,doc):
     with store.connect() as db:notes=[dict(r) for r in db.execute('SELECT * FROM presentation_notes WHERE doc_id=? ORDER BY sort_order,id',(doc.id,))]
-    parts=[f'# {plain(doc.title)} — 발표 노트','논문 명시·해석·계산값을 구분하고 발표 전에 원문과 수치를 확인하세요.']
+    parts=[f'# {plain(doc.title)} — 메모장','이 논문에 저장한 나의 메모입니다.']
     for i,n in enumerate(notes,1):
         parts.extend([f'## {i}. {n["title"]}',n['body_md'],f'근거 블록: {n["block_id"] or "직접 작성"}'])
     return '\n\n'.join(parts)+'\n'

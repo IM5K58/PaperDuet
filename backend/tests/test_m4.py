@@ -55,6 +55,25 @@ def test_presentation_curate_edit_reorder_export_persist_and_secret_redaction(ap
     assert client.delete(base+'/'+first['id']).status_code==204
     assert len(client.get(base).json())==1
 
+@pytest.mark.sample
+def test_notebook_preserves_existing_notes_and_is_document_scoped(api):
+    client,store,_=api
+    legacy=client.post('/documents/m2-paper/presentation',json={'title':'기존 메모','body_md':'보관한 내용'}).json()
+    base='/documents/m2-paper/memos'
+    assert client.get(base).json()[0]['id']==legacy['id']
+    assert client.get('/documents/rex-omni/memos').json()==[]
+    created=client.post(base,json={'title':'내 생각','body_md':'직접 쓴 내용 test-key-secret-value'}).json()
+    assert 'test-key-secret-value' not in created['body_md']
+    assert client.put('/documents/rex-omni/memos/'+created['id'],json={'title':'다른 논문','body_md':'덮어쓰기'}).status_code==404
+    assert client.put(base+'/'+created['id'],json={'title':'수정 메모','body_md':'수정한 내용'}).status_code==204
+    assert client.get(base).json()[-1]['body_md']=='수정한 내용'
+    assert '메모장' in client.get('/documents/m2-paper/export?format=presentation').text
+    assert client.get('/documents/missing/memos').status_code==404
+    assert client.get(base,headers={'Authorization':''}).status_code==401
+    assert client.delete(base+'/'+legacy['id']).status_code==204
+    with Store(store.data_dir,FIXTURE).connect() as db:
+        assert db.execute('SELECT body_md FROM presentation_notes WHERE id=?',(created['id'],)).fetchone()[0]=='수정한 내용'
+
 @pytest.mark.parametrize('value',['http://arxiv.org/abs/2603.07952','https://evil.test/2603.07952','https://arxiv.org@evil.test/abs/2603.07952','../../etc','https://arxiv.org:8080/abs/2603.07952','2603.07952?url=http://localhost'])
 def test_arxiv_rejects_untrusted_locations(value):
     with pytest.raises(ValueError):arxiv_id(value)
