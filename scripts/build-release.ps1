@@ -7,6 +7,8 @@ param(
 )
 $ErrorActionPreference='Stop'
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
+node scripts/bump-version.mjs --check
+if ($LASTEXITCODE -ne 0) { throw 'Version strings disagree. Run: npm run version:set -- <version>' }
 if (([uri]$UpdateUrl).Scheme -ne 'https' -or ([uri]$InstallerUrl).Scheme -ne 'https') { throw 'Update and installer URLs must use HTTPS.' }
 if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Set TAURI_SIGNING_PRIVATE_KEY to your private signing key path. Do not commit the key.' }
 $previousUpdateUrl=$env:PAPERDUET_UPDATE_URL

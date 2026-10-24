@@ -15,7 +15,7 @@ import type { Block, Document, NoteKind, Settings, View } from './types';
 
 const INITIAL: Settings = { view: 'split', theme: 'light', font_size: 16, show_notes: true, note_kinds: ['key', 'res', 'lim', 'ins', 'mth', 'trm'], density: 'high' };
 const textOnly = (html: string) => html.replace(/<[^>]*>/g, '').replace(/&[a-z0-9#]+;/gi, ' ');
-export function App({docId='rex-omni',onLibrary,onProcess,onTutorial,offline=false}:{docId?:string;onLibrary?:()=>void;onProcess?:()=>void;onTutorial?:()=>void;offline?:boolean}) {
+export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:string;onLibrary?:()=>void;onProcess?:()=>void;onTutorial?:()=>void;offline?:boolean}) {
   const [doc, setDoc] = useState<Document | null>(null);
   const ask=useAsk(doc,!offline);
   const askImage=useCallback((block:Block)=>ask.open({kind:'figure',blockId:block.id}),[ask.open]);

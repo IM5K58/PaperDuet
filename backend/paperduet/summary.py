@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from pydantic import Field
 
 from .adapter import plain
-from .annotations import section_batches, source_text
+from .annotations import section_batches
 from .models import Model
 from .pipeline import AIRequest, compact, tracked
 from .provider import ProviderError

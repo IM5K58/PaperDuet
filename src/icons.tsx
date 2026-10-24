@@ -35,7 +35,7 @@ const PATHS = {
   arrowRight: ['M5 12h14', 'm13 6 6 6-6 6'],
 } as const;
 
-export type IconName = keyof typeof PATHS;
+type IconName = keyof typeof PATHS;
 
 export function Icon({ name }: { name: IconName }) {
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{PATHS[name].map(d => <path key={d} d={d} />)}</svg>;

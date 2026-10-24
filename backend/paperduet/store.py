@@ -8,6 +8,10 @@ from .adapter import adapt_fixture
 from .models import Block, Document, PipelineOptions, ReaderSettings, ReadingPosition
 from .validation import translation_complete
 
+# The newest database version this app reads. A new migration_N.sql raises it to N;
+# the sidecar build bundles every migration_*.sql and checks that 2..N all exist.
+SCHEMA_VERSION = 9
+
 
 class Store:
     def __init__(self, data_dir: Path, fixture: Path):
@@ -17,26 +21,13 @@ class Store:
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version > 9:
+            if version > SCHEMA_VERSION:
                 raise RuntimeError("Database version is newer than this app")
             if version == 0:
                 db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
-            if version < 2:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_2.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 3:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_3.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 4:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_4.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 5:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_5.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 6:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_6.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 7:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_7.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 8:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_8.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
-            if version < 9:
-                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name("migration_9.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
+            # schema.sql is version 1; each migration_N.sql moves the database to N.
+            for step in range(max(version, 1) + 1, SCHEMA_VERSION + 1):
+                db.executescript("BEGIN IMMEDIATE;\n" + Path(__file__).with_name(f"migration_{step}.sql").read_text(encoding="utf-8") + "\nCOMMIT;")
             # The sample paper is optional: it is not published with the source,
             # and a user who deleted it does not get it back on the next start.
             if fixture.is_file() and not db.execute("SELECT 1 FROM documents WHERE id='rex-omni'").fetchone() \

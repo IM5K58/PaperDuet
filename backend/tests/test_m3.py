@@ -12,9 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from paperduet.app import create_app
-from paperduet.ask import Anchor, AskInput, AskSettings, build_context
+from paperduet.ask import AskInput, AskSettings, build_context
 from paperduet.cli_provider import CLIProvider, execute, resolve_cli
-from paperduet.models import Block, PipelineOptions
 from paperduet.provider import ProviderError
 from paperduet.providers import APIProvider, Redactor
 from paperduet.store import Store

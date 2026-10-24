@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sqlite3
 from pathlib import Path
 import httpx
 import pytest
@@ -9,7 +8,6 @@ from fastapi.testclient import TestClient
 from paperduet.app import create_app
 from paperduet.arxiv import arxiv_id,parse_html,ArxivImporter
 from paperduet.store import Store
-from paperduet.storage import copy_storage
 from test_m3 import Vault,ChatDouble,body,events
 from m2_sample import seed,FIXTURE
 

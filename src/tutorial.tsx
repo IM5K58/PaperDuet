@@ -14,7 +14,7 @@ type Scene = {
   actionLabel: string;
 };
 
-export const SCENES: Scene[] = [
+const SCENES: Scene[] = [
   {
     id: 'connect', label: 'AI 연결',
     flow: ['연결 방식 선택', '키 저장 · CLI 로그인', '연결 확인'],

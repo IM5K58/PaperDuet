@@ -6,14 +6,13 @@ import sqlite3
 from fastapi.testclient import TestClient
 
 from paperduet.app import create_app
-from paperduet.annotations import first_occurrences
 from paperduet.models import Block, Note, PipelineOptions, ReadingPosition
 from paperduet.pipeline import Pipeline
 from paperduet.store import Store
 from paperduet.table_style import decorate_tables
 from paperduet.validation import numeric_locations, table_grid
 from m2_sample import FIXTURE, SampleProvider, seed
-from test_m1 import MemoryVault, wait_job
+from test_m1 import MemoryVault
 
 
 def run(store,doc_id,provider):

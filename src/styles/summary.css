@@ -31,7 +31,6 @@
 .kind-res { --field-bg:var(--res-bg); --field-bd:var(--res-bd); --field-ink:var(--res-ink); }
 .kind-lim { --field-bg:var(--lim-bg); --field-bd:var(--lim-bd); --field-ink:var(--lim-ink); }
 .summary-point p, .summary-step p { margin:0; font-family:var(--serif-ko); font-size:var(--read-ko); line-height:var(--lh-read-ko); color:var(--ink); }
-.summary-point .qa-label { display:inline-block; margin:0 0 0 var(--s-xs); font-family:var(--sans); }
 .summary-edited { margin-left:var(--s-xs); font-family:var(--sans); font-size:var(--t-label); color:var(--text-muted); }
 
 .summary-meta { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s-xxs) var(--s-xs); margin-top:var(--s-xxs); }

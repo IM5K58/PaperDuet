@@ -4,7 +4,6 @@ Page caches retain positions independently from the public PRD Block schema.
 All MuPDF access is serialized: its native document objects are not thread safe.
 """
 import html
-import json
 import re
 import threading
 from collections import Counter

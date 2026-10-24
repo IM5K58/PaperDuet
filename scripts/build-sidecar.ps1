@@ -9,11 +9,16 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $policyPath) | Out
 [IO.File]::WriteAllText($policyPath, (@{ cli_enabled = -not $DisableCli.IsPresent } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
 node scripts/build-export.mjs
 if ($LASTEXITCODE -ne 0) { throw 'Export reader build failed.' }
-# The sample paper is kept out of the public repository; bundle it only when present locally.
-$sampleFixture = Join-Path $projectRoot 'fixtures\rex-omni.blocks.json'
-# The Rex-Omni sample is no longer shipped; the fixture stays a local test asset only.
-$sampleData = @()
-& $pythonExe -m PyInstaller --noconfirm --clean --onedir --console --name paperduet-backend --paths (Join-Path $projectRoot 'backend') --distpath src-tauri/resources/backend-build --workpath build/pyinstaller --specpath build @sampleData --add-data "$(Join-Path $projectRoot 'backend\paperduet\schema.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_2.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_3.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\prompts');paperduet/prompts" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_4.sql');paperduet" --add-data "$policyPath;paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_5.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_6.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_7.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_8.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\paperduet\migration_9.sql');paperduet" --add-data "$(Join-Path $projectRoot 'backend\resources');resources" --hidden-import keyring.backends.Windows --hidden-import uvicorn.logging --hidden-import uvicorn.loops.asyncio --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.lifespan.on backend/entrypoint.py
+# The Rex-Omni sample is not shipped; the fixture stays a local test asset only.
+# Every migration_N.sql ships with the sidecar. Store applies them up to SCHEMA_VERSION,
+# so a missing step would leave installed apps unable to open their library.
+$packageDir = Join-Path $projectRoot 'backend\paperduet'
+$schemaMatch = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $packageDir 'store.py')), '(?m)^SCHEMA_VERSION\s*=\s*(\d+)')
+if (-not $schemaMatch.Success) { throw 'SCHEMA_VERSION not found in backend/paperduet/store.py.' }
+$schemaVersion = [int]$schemaMatch.Groups[1].Value
+if ($schemaVersion -ge 2) { foreach ($step in 2..$schemaVersion) { if (-not (Test-Path -LiteralPath (Join-Path $packageDir "migration_$step.sql"))) { throw "migration_$step.sql is missing (SCHEMA_VERSION = $schemaVersion)." } } }
+$migrationData = Get-ChildItem -LiteralPath $packageDir -Filter 'migration_*.sql' | Sort-Object Name | ForEach-Object { '--add-data'; "$($_.FullName);paperduet" }
+& $pythonExe -m PyInstaller --noconfirm --clean --onedir --console --name paperduet-backend --paths (Join-Path $projectRoot 'backend') --distpath src-tauri/resources/backend-build --workpath build/pyinstaller --specpath build --add-data "$(Join-Path $packageDir 'schema.sql');paperduet" @migrationData --add-data "$(Join-Path $packageDir 'prompts');paperduet/prompts" --add-data "$policyPath;paperduet" --add-data "$(Join-Path $projectRoot 'backend\resources');resources" --hidden-import keyring.backends.Windows --hidden-import uvicorn.logging --hidden-import uvicorn.loops.asyncio --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.lifespan.on backend/entrypoint.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 $sourceDir = [IO.Path]::GetFullPath((Join-Path $projectRoot 'src-tauri\resources\backend-build\paperduet-backend'))
 $targetDir = [IO.Path]::GetFullPath((Join-Path $projectRoot 'src-tauri\resources\backend'))

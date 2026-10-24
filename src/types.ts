@@ -9,7 +9,6 @@ export interface Block {
   table?: { header: Cell[][]; body: Cell[][]; highlight_rows: number[]; best_cells: [number, number][] };
   card?: { body: string; explain_ko: string };
   note?: { kind: NoteKind; title: string; body_md: string; claim: 'stated' | 'interpretation' | 'mixed'; refs: string[]; origin: 'generated' | 'user' | 'ai_answer' };
-  qa_flags: string[];
 }
 export interface Position { block_id: string | null; offset: number }
 export interface Document {

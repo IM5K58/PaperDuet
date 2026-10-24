@@ -71,10 +71,8 @@
 .document-actions>span,.export-notice { color:var(--text-muted); font-size:var(--t-label); line-height:var(--lh-label); }
 .note-editor label { display:block; margin:var(--s-sm) 0; }
 .note-editor input:not([type=checkbox]),.note-editor select { display:block; width:100%; min-width:0; margin-top:var(--s-xxs); }
-.note-validation-help { font-size:var(--t-label); color:var(--text-muted); }
 
 @media(max-width:1023px) {
-  .ask-scrim:hover { background:var(--overlay); }
   .ask-panel { width:min(480px,100vw); border-left:0; }
   .ask-composer { max-height:44dvh; }
   .ask-panel>header { padding-top:var(--s-sm); }

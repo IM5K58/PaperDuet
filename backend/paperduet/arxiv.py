@@ -7,7 +7,6 @@ import re
 import shutil
 import time
 import uuid
-from pathlib import Path
 from urllib.parse import urljoin,urlparse,unquote
 import httpx
 from bs4 import BeautifulSoup,Tag,NavigableString

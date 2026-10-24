@@ -7,7 +7,7 @@ import { memo } from 'react';
 // Models often delimit math as \( … \) and \[ … \]; remark-math only knows $ and $$,
 // and Markdown would eat the backslashes, leaving raw "QW_i^Q" on screen.
 // Code spans and fences are left alone.
-export function normalizeMath(text:string) {
+function normalizeMath(text:string) {
   return text.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part,i)=>i%2?part:part
     .replace(/\\\[([\s\S]+?)\\\]/g,(_,math:string)=>`\n$$\n${math.trim()}\n$$\n`)
     .replace(/\\\(([\s\S]+?)\\\)/g,(_,math:string)=>`$${math.trim()}$`)).join('');

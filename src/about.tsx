@@ -4,7 +4,7 @@ import creator from './assets/creator.png';
 import { Modal } from './connections';
 import { Icon } from './icons';
 
-export const LINKS = {
+const LINKS = {
   releases: 'https://github.com/IM5K58/PaperDuet/releases/latest',
   source: 'https://github.com/IM5K58/PaperDuet',
   bugs: 'https://forms.gle/aFKGWLuKtdAFjwHV6',
@@ -12,7 +12,7 @@ export const LINKS = {
 } as const;
 
 // The desktop shell opens only these addresses in the default browser (desktop.rs LINKS).
-export function openLink(url: string) {
+function openLink(url: string) {
   void invoke('open_link', { url }).catch(() => window.open(url, '_blank', 'noopener'));
 }
 

@@ -15,7 +15,7 @@ from pydantic import Field, SecretStr
 from .models import Model, Note, PipelineOptions, ReaderSettings, ReadingPosition
 from .store import Store
 from .pipeline import BUSY, Pipeline
-from .provider import AnthropicProvider, ProviderError, WindowsVault
+from .provider import ProviderError, WindowsVault
 from .adapter import inline
 from .providers import ProviderRegistry
 from .ask import AskService, AskInput, AskSettings

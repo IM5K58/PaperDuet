@@ -6,7 +6,7 @@ import { Modal } from './connections';
 import type { Document } from './types';
 
 export type UpdateInfo={configured:boolean;available?:boolean;version?:string;current_version:string;body?:string};
-export async function saveExport(docId:string,format:string){return invoke<string|null>('export_document',{docId,format});}
+async function saveExport(docId:string,format:string){return invoke<string|null>('export_document',{docId,format});}
 export function DocumentActions({doc}:{doc:Document}){
   const [exporting,setExporting]=useState(false);
   return <><div className="document-actions"><button onClick={()=>setExporting(true)}>내보내기</button>{doc.source_kind==='arxiv_html'&&<span>arXiv HTML 원문 · 표·LaTeX 수식 보존</span>}</div>{exporting&&<ExportDialog doc={doc} onClose={()=>setExporting(false)}/>}</>;

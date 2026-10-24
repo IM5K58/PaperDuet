@@ -6,11 +6,11 @@ import type { ConnectionMode, PipelineOptions, Provider } from './types';
 
 export const DEFAULTS:PipelineOptions={provider:'anthropic',mode:'api_key',glossary_model:'claude-sonnet-5',translate_model:'claude-haiku-4-5',restore_model:'claude-sonnet-5',annotate_model:'claude-sonnet-5',min_ratio:.25};
 export type ProviderSettings={configured:boolean;keyring_available:boolean;options:PipelineOptions;cli_enabled:boolean;cli_path:string|null};
-export const NAMES={anthropic:'Anthropic',openai:'OpenAI',google:'Google AI Studio'};
+const NAMES={anthropic:'Anthropic',openai:'OpenAI',google:'Google AI Studio'};
 export const defaultModel=(provider:Provider,mode:ConnectionMode)=>provider==='anthropic'?(mode==='cli'?'sonnet':'claude-sonnet-5'):provider==='openai'?(mode==='cli'?'default':'gpt-5.4'):'gemini-3.8-flash';
 const CLAUDE_MODELS:[string,string][]=[['claude-opus-5-5','Claude Opus 5.5'],['claude-opus-5','Claude Opus 5'],['claude-opus-4-8','Claude Opus 4.8'],['claude-opus-4-7','Claude Opus 4.7'],['claude-opus-4-6','Claude Opus 4.6'],['claude-sonnet-5','Claude Sonnet 5'],['claude-sonnet-4-6','Claude Sonnet 4.6'],['claude-haiku-4-5','Claude Haiku 4.5']];
 // Model lists for the pickers. Anything else can still be typed via "직접 입력".
-export const modelPresets=(provider:Provider,mode:ConnectionMode):[string,string][]=>provider==='anthropic'?(mode==='cli'?[['sonnet','sonnet · CLI 최신 Sonnet'],['opus','opus · CLI 최신 Opus'],['haiku','haiku · CLI 최신 Haiku'],...CLAUDE_MODELS]:CLAUDE_MODELS)
+const modelPresets=(provider:Provider,mode:ConnectionMode):[string,string][]=>provider==='anthropic'?(mode==='cli'?[['sonnet','sonnet · CLI 최신 Sonnet'],['opus','opus · CLI 최신 Opus'],['haiku','haiku · CLI 최신 Haiku'],...CLAUDE_MODELS]:CLAUDE_MODELS)
   :provider==='openai'&&mode==='cli'?[['default','default · Codex 기본 모델'],['gpt-6-astra','GPT-6 Astra'],['gpt-6-sol','GPT-6 Sol'],['gpt-6-luna','GPT-6 Luna'],['gpt-5.5','GPT-5.5']]:[];
 const CUSTOM='__custom__';
 export function ModelSelect({provider,mode,value,onChange,label,disabled,listId}:{provider:Provider;mode:ConnectionMode;value:string;onChange:(v:string)=>void;label:string;disabled?:boolean;listId?:string}) {

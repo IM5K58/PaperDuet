@@ -96,6 +96,7 @@ BUSY = {'queued', 'running', 'batch_waiting'}
 # Answers a work unit handles itself; every other provider error pauses the job.
 SOFT = {'AI_INVALID_JSON', 'AI_OUTPUT_LIMIT'}
 PARSER_REVISION = 3  # 2: pages-v2 extraction; 3: paragraphs rejoined across breaks
+COMPLETION_REFRESHED = 'completion_refreshed_1'  # app_settings key: legacy completion re-derived once
 MISSING = object()
 
 
@@ -182,8 +183,14 @@ class Pipeline:
                 db.execute("UPDATE jobs SET status='queued',stage='Extract',progress=0,checkpoint=? WHERE doc_id=?",(json.dumps(checkpoint),row['doc_id']))
             ids=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('queued','running','batch_waiting')")]
             finished=[r[0] for r in db.execute("SELECT doc_id FROM jobs WHERE status IN ('review','complete')")]
-        for doc_id in finished:
-            self.refresh_completion(doc_id)
+            refreshed=db.execute('SELECT 1 FROM app_settings WHERE key=?',(COMPLETION_REFRESHED,)).fetchone()
+        # Completion once depended on the removed automatic review. One pass per library
+        # re-derives it from the translations; every later edit refreshes its own paper.
+        if not refreshed:
+            for doc_id in finished:
+                self.refresh_completion(doc_id)
+            with self.store.connect() as db:
+                db.execute("INSERT INTO app_settings VALUES(?,'true') ON CONFLICT(key) DO UPDATE SET payload=excluded.payload",(COMPLETION_REFRESHED,))
         for doc_id in ids:
             self.start(doc_id)
 

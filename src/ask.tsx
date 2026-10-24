@@ -12,7 +12,7 @@ import type { Document, NoteKind } from './types';
 export type { Anchor } from './ask-conversations';
 const plain=(value:string)=>value.replace(/<[^>]*>/g,'');
 
-export function selectedAnchor():Anchor|null {
+function selectedAnchor():Anchor|null {
   const selection=window.getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount)return null;
   const range=selection.getRangeAt(0);const start=range.startContainer.nodeType===Node.ELEMENT_NODE?range.startContainer as Element:range.startContainer.parentElement;
   const field=start?.closest<HTMLElement>('[data-ask-field]');const block=field?.closest('[data-block]');

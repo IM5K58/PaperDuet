@@ -1,5 +1,4 @@
 import re
-from collections import Counter
 
 from .adapter import plain
 from .models import Block, Table
@@ -31,10 +30,6 @@ def table_grid(table: Table):
     if not widths or not widths[0] or len(set(widths))!=1:
         raise ValueError("Inconsistent table widths")
     return occupied, widths[0]
-
-
-def numeric_cells(table: Table):
-    return Counter(plain(c.text_en).strip() for row in table.body for c in row if NUMERIC_CELL.fullmatch(plain(c.text_en).strip()))
 
 
 def numeric_locations(table: Table):

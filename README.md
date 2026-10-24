@@ -138,6 +138,8 @@ npm run build
 
 결과물은 `src-tauri/target/release/bundle/nsis/PaperDuet_<버전>_x64-setup.exe`입니다. 이 빌드는 자동 업데이트가 꺼진 개인용 설치 파일입니다. 자동 업데이트가 켜진 배포용 설치 파일과 `latest.json`은 Tauri 업데이트 서명 키를 준비한 뒤 `.\scripts\release.ps1`로 만듭니다.
 
+버전은 `npm run version:set -- 0.10.1`처럼 한 번에 올립니다. `package.json`, `package-lock.json`, `Cargo.toml`, `Cargo.lock`, `tauri.conf.json`과 README의 설치 파일 이름이 함께 바뀌며, `npm run version:check`로 일치 여부를 확인할 수 있습니다. 배포 빌드(`release.ps1`)는 버전이 어긋나면 시작하지 않습니다.
+
 ### 테스트
 
 ```powershell
