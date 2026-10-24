@@ -22,11 +22,15 @@ fn main() {
             } else {
                 app.path().resource_dir()?.join("backend/paperduet-backend.exe")
             };
+            // The dev app keeps its own library: sharing the installed app's would upgrade it
+            // to a schema the installed version cannot open.
+            let (folder, location) = if cfg!(debug_assertions) { ("PaperDuet-dev", "PaperDuet-dev-location.json") }
+                else { ("PaperDuet", "PaperDuet-location.json") };
             let data = if cfg!(debug_assertions) {
                 std::env::var_os("PAPERDUET_DATA_DIR").map(std::path::PathBuf::from)
-                    .unwrap_or(app.path().data_dir()?.join("PaperDuet"))
-            } else { app.path().data_dir()?.join("PaperDuet") };
-            let location_file=app.path().data_dir()?.join("PaperDuet-location.json");
+                    .unwrap_or(app.path().data_dir()?.join(folder))
+            } else { app.path().data_dir()?.join(folder) };
+            let location_file=app.path().data_dir()?.join(location);
             let data=desktop::location(&data,&location_file);
             app.manage(desktop::Desktop{location_file,selected:std::sync::Mutex::new(None),operation:std::sync::Mutex::new(false)});
             desktop::configure_updater(app.handle())?;

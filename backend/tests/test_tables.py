@@ -41,6 +41,21 @@ def test_restore_replaces_a_distrusted_grid_from_the_image(tmp_path):
     assert block.qa_flags == [] and len(block.table.body) == 2 and len(block.table.header[0]) == 3
 
 
+def test_a_table_that_cannot_be_restored_keeps_its_extraction_and_the_paper_goes_on(tmp_path):
+    # 0.10.0 stopped the whole paper here, and every resume stopped at the same table again.
+    store, doc_id = seed(tmp_path)
+    source = Block(id='t', doc_id=doc_id, order=0, type='tab', section_path=[], table=GOOD,
+                   en='Method AUROC AP', image_path='documents/m2-paper/crops/figure.png')
+    calls = []
+    class Unusable:
+        async def json(self, *args):
+            calls.append(args)  # a grid whose rows do not line up
+            return {'html': '<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>'}, {'tokens_in': 1, 'tokens_out': 1}
+    block = source.model_copy(deep=True)
+    asyncio.run(Pipeline(store, Unusable()).restore_block(doc_id, block, source, PipelineOptions()))
+    assert len(calls) == 2 and block.table == GOOD  # both attempts used, extraction kept, no error
+
+
 def test_legacy_review_status_is_normalized_without_altering_table_content(tmp_path):
     store,doc_id=seed(tmp_path)
     doc=store.document(doc_id);table=next(b for b in doc.blocks if b.type=='tab')

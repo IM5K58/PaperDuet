@@ -1,7 +1,7 @@
 {
   "name": "paperduet",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.10.1",
   "type": "module",
   "scripts": {
     "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",

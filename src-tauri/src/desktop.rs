@@ -99,9 +99,13 @@ pub async fn install_update(window:tauri::WebviewWindow,app:tauri::AppHandle,sta
     allowed(&window)?;let Some((url,key))=update_config() else{return Err("업데이트 배포 경로가 연결되지 않았습니다.".into())};
     {let mut lock=desktop.operation.lock().unwrap();if *lock{return Err("다른 작업을 마친 뒤 다시 시도해 주세요.".into())}*lock=true;}
     let result=async{
-        let connection=state.connection()?;
-        let status=client()?.get(local(&connection,"/settings/storage")).bearer_auth(&connection.token).send().await.map_err(|_|"앱 상태 확인 실패")?.json::<Value>().await.map_err(|_|"앱 상태 확인 실패")?;
-        if status["busy"]==true{return Err("번역·질문을 마친 뒤 업데이트해 주세요.".into());}
+        // Only a reader that answers can be busy. One that failed to start (or does not answer)
+        // has nothing to finish, and the update may be exactly what it needs.
+        if let Ok(connection)=state.connection(){
+            if let Ok(response)=client()?.get(local(&connection,"/settings/storage")).bearer_auth(&connection.token).timeout(Duration::from_secs(10)).send().await{
+                if response.json::<Value>().await.unwrap_or_default()["busy"]==true{return Err("번역·질문을 마친 뒤 업데이트해 주세요.".into());}
+            }
+        }
         let manager=state.inner().clone();
         let updater=app.updater_builder().pubkey(key).endpoints(vec![url.parse().map_err(|_|"업데이트 주소 오류")?]).map_err(|_|"업데이트 설정 오류")?.on_before_exit(move||manager.shutdown()).timeout(Duration::from_secs(120)).build().map_err(|_|"업데이트 설정 오류")?;
         let Some(update)=updater.check().await.map_err(|_|"업데이트 확인에 실패했습니다.")? else{return Err("현재 최신 버전입니다.".into())};

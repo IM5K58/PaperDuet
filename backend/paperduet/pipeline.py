@@ -632,7 +632,9 @@ class Pipeline:
                 return
             except (ValueError,KeyError,TypeError):
                 self.store.discard_ai_result(doc_id,request.key)
-                if attempt==1:raise ProviderError('AI_INVALID_JSON') from None
+        # Neither answer gave a usable table or equation. Keep the extracted block (the
+        # reader shows its page image) and let the rest of the paper go on: stopping here
+        # would stop the same paper on every resume.
 
     async def restore_block(self,doc_id,block,source,options):
         await self.drive(doc_id,[self.restore_unit(doc_id,block,source,options)],self.immediate(options),cache=False,pausable=False)
