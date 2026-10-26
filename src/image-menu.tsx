@@ -14,8 +14,11 @@ export function useImageMenu(onAsk?: () => void) {
     popup.style.top = `${Math.max(8, Math.min(point.y, innerHeight - popup.offsetHeight - 8))}px`;
     popup.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
     const close = () => setPoint(null);
+    const outside = (event:PointerEvent) => { if(!popup.contains(event.target as Node))close(); };
+    document.addEventListener('pointerdown', outside, true);
     document.addEventListener('scroll', close, true); window.addEventListener('resize', close); window.addEventListener('blur', close);
     return () => {
+      document.removeEventListener('pointerdown', outside, true);
       document.removeEventListener('scroll', close, true); window.removeEventListener('resize', close); window.removeEventListener('blur', close);
       if (popup.matches(':popover-open')) popup.hidePopover();
     };
@@ -31,7 +34,9 @@ export function useImageMenu(onAsk?: () => void) {
     event.preventDefault(); event.stopPropagation(); opener.current = event.currentTarget;
     const box = event.currentTarget.getBoundingClientRect(); setPoint({ x: box.left + 12, y: box.top + 12 });
   };
-  const element = point && <div ref={menu} popover="auto" role="menu" aria-label="그림 메뉴" className="image-ask-menu"
+  // WebKit can emit contextmenu before pointerup. An auto popover treats that
+  // opening pointerup as an outside click and immediately hides the new menu.
+  const element = point && <div ref={menu} popover="manual" role="menu" aria-label="그림 메뉴" className="image-ask-menu"
     onToggle={event => { if (!event.currentTarget.matches(':popover-open')) setPoint(null); }}
     onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(true); }

@@ -1,4 +1,4 @@
-"""API transports. Credentials are obtained exclusively from Windows keyring."""
+"""API transports. Credentials come exclusively from the native OS vault."""
 import base64
 import json
 import sys
@@ -21,17 +21,23 @@ class Vault(Protocol):
     def delete(self): ...
 
 
-class WindowsVault:
+class SystemVault:
     def __init__(self,service="PaperDuet",provider="anthropic"):
         self.service=service
         self.provider=provider
     def _backend(self):
-        if sys.platform != "win32":
-            raise ProviderError("KEYRING_UNAVAILABLE")
         # Deliberately bypass backend discovery: never fall back to a plaintext
         # file backend or an installed third-party keyring implementation.
-        from keyring.backends.Windows import WinVaultKeyring
-        return WinVaultKeyring()
+        if sys.platform == "win32":
+            from keyring.backends.Windows import WinVaultKeyring
+            return WinVaultKeyring()
+        if sys.platform == "darwin":
+            from keyring.backends.macOS import Keyring
+            backend = Keyring()
+            # Ignore KEYCHAIN_PATH, including an inherited build-shell override.
+            backend.keychain = None
+            return backend
+        raise ProviderError("KEYRING_UNAVAILABLE")
 
     def get(self):
         try:
@@ -51,6 +57,13 @@ class WindowsVault:
                 self._backend().delete_password(self.service, self.provider)
         except Exception:
             raise ProviderError("KEYRING_UNAVAILABLE") from None
+
+
+class WindowsVault(SystemVault):
+    """Compatibility name for existing Windows tests and integrations."""
+    def _backend(self):
+        if sys.platform != 'win32':raise ProviderError('KEYRING_UNAVAILABLE')
+        return super()._backend()
 
 
 class AnthropicProvider:

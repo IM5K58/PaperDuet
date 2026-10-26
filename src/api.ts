@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { credentialStore } from './platform';
 
 interface Connection { port: number; token: string; generation: number }
 export const ERROR_TEXT: Record<string,string> = {
@@ -9,7 +10,7 @@ export const ERROR_TEXT: Record<string,string> = {
   AI_OVERLOADED: 'AI 제공자 서버가 혼잡해 여러 번 다시 시도했지만 응답이 없었습니다. 잠시 후 이어서 실행해 주세요.', AI_MODEL_NOT_FOUND: '선택한 모델을 찾을 수 없습니다. AI 연결 설정에서 모델 이름을 확인해 주세요.',
   AI_RATE_LIMIT: '사용량 한도에 도달했습니다. 잠시 후 이어서 실행해 주세요.', AI_REQUEST_FAILED: 'AI 요청이 거부되었습니다. 모델과 API 사용 가능 여부를 확인해 주세요.',
   AI_NETWORK_ERROR: 'AI에 연결하지 못했습니다. 네트워크를 확인하고 재개해 주세요.', AI_INVALID_JSON: 'AI 응답 형식이 맞지 않습니다. 다시 시도해 주세요.',
-  KEYRING_UNAVAILABLE: 'Windows 자격 증명 관리자에 접근하지 못했습니다.', INVALID_KEY_FORMAT: 'API 키 형식을 확인해 주세요.',
+  KEYRING_UNAVAILABLE: `${credentialStore}에 접근하지 못했습니다.`, INVALID_KEY_FORMAT: 'API 키 형식을 확인해 주세요.',
   INVALID_PDF: '열 수 없는 PDF입니다. 파일이 손상되었는지 확인해 주세요.', UNSUPPORTED_PDF: '암호가 있거나 지원 범위를 벗어난 PDF입니다.', PDF_TOO_LARGE: 'PDF는 150MB 이하만 지원합니다.',
   DOCUMENT_NOT_READY: '본문 추출이 끝난 뒤 요약을 만들 수 있습니다.', SUMMARY_RUNNING: '요약을 만들고 있습니다. 끝난 뒤 다시 시도해 주세요.', SUMMARY_NOT_FOUND: '먼저 요약을 만들어 주세요.',
   JOB_NOT_RESUMABLE: '작업 상태를 새로 확인한 뒤 다시 실행해 주세요.', JOB_BUSY: '처리를 일시정지한 뒤 수정해 주세요.', PIPELINE_FAILED: '이 단계 처리에 실패했습니다. 저장된 지점부터 다시 시도할 수 있습니다.',

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BrandMark, Icon } from './icons';
 import { resolveTheme } from './theme';
+import { isMac, shortcut } from './platform';
 import './tutorial.css';
 
 type Destination = 'connection' | 'library' | 'settings';
@@ -17,10 +18,10 @@ type Scene = {
 const SCENES: Scene[] = [
   {
     id: 'connect', label: 'AI 연결',
-    flow: ['연결 방식 선택', '키 저장 · CLI 로그인', '연결 확인'],
+    flow: ['연결 방식 선택', isMac ? 'API 키 저장' : '키 저장 · CLI 로그인', '연결 확인'],
     steps: [
       '‘AI 연결 설정’에서 제공자와 연결 방식을 고릅니다.',
-      'API 키를 입력하고 ‘키 저장’을 누릅니다. 공식 CLI는 터미널에서 먼저 로그인합니다.',
+      isMac ? 'macOS 베타에서는 API 키를 입력하고 ‘키 저장’을 누릅니다.' : 'API 키를 입력하고 ‘키 저장’을 누릅니다. 공식 CLI는 터미널에서 먼저 로그인합니다.',
       '‘연결 확인’이 완료되면 논문을 가져올 준비가 끝납니다.',
     ],
     note: 'API 요금은 구독과 별도입니다. 논문 내용은 번역·질문·요약을 시작할 때 선택한 AI로 전송됩니다.',
@@ -41,7 +42,7 @@ const SCENES: Scene[] = [
     id: 'ask', label: 'Ask AI',
     flow: ['문장 선택', 'Ask AI', '후속 질문'],
     steps: [
-      '문장을 드래그한 뒤 ‘Ask AI’를 누르면 선택한 문장으로 새 대화를 엽니다. Ctrl+K로도 열 수 있습니다.',
+      `문장을 드래그한 뒤 ‘Ask AI’를 누르면 선택한 문장으로 새 대화를 엽니다. ${shortcut('K')}로도 열 수 있습니다.`,
       '질문을 쓰거나 ‘쉽게 설명’으로 질문 칸을 채운 뒤 ‘질문 보내기’를 누릅니다.',
       '답변을 읽고 같은 대화에서 질문을 이어갑니다. 좋은 답변은 메모장에 추가하세요.',
     ],

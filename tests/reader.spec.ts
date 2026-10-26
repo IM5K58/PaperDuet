@@ -9,12 +9,13 @@ import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 
 // M3 uses real FastAPI, context assembly, SQLite and SSE with only AI transport replaced.
+const python=resolve(process.platform==='win32'?'.venv/Scripts/python.exe':'.venv/bin/python');
 
 const test = base.extend<{ backend: { port: number; token: string; generation: number; dataDir:string } }>({
   backend: async ({}, use, testInfo) => {
     const token = randomBytes(32).toString('hex');
     const dataDir = await mkdtemp(join(tmpdir(), 'PaperDuet E2E 한글 '));
-    const child = spawn(resolve('.venv/Scripts/python.exe'), [resolve((testInfo.title.startsWith('M3:')||testInfo.title.startsWith('M4:'))?'backend/tests/m3_server.py':testInfo.title.startsWith('M2:')?'backend/tests/m2_server.py':'backend/entrypoint.py')], {
+    const child = spawn(python, [resolve((testInfo.title.startsWith('M3:')||testInfo.title.startsWith('M4:'))?'backend/tests/m3_server.py':testInfo.title.startsWith('M2:')?'backend/tests/m2_server.py':'backend/entrypoint.py')], {
       env: { ...process.env, PAPERDUET_TEST_ARXIV:testInfo.title.startsWith('M4:')?'1':'',PAPERDUET_SESSION_TOKEN: token, PAPERDUET_DATA_DIR: dataDir, PAPERDUET_ORIGIN: 'http://127.0.0.1:1420' }, windowsHide: true,
     });
     try {
@@ -55,7 +56,7 @@ async function setReaderTheme(page:Page,theme?:string){
 
 test('Library: bookshelf pages, progress, search, menus, import dialog and responsive themes',async({page,backend},info)=>{
   test.setTimeout(120000);
-  execFileSync(resolve('.venv/Scripts/python.exe'),[resolve('backend/tests/shelf_sample.py'),backend.dataDir],{windowsHide:true});
+  execFileSync(python,[resolve('backend/tests/shelf_sample.py'),backend.dataDir],{windowsHide:true});
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
   await page.setViewportSize({width:1440,height:1118});await page.goto('/?library=1');
@@ -105,7 +106,7 @@ test('Library: empty state, modal PDF selection, deletion and whole-page drop',a
   await expect(page.locator('.library-empty')).toBeVisible();await expect(page.locator('.shelf-viewport')).toHaveCount(0);
   await page.screenshot({path:info.outputPath('shelf-empty-390.png'),fullPage:true});
   await page.locator('.library-empty').getByRole('button',{name:'논문 추가'}).click();
-  const pdf=execFileSync(resolve('.venv/Scripts/python.exe'),['-c',"import sys; sys.path[:0]=['backend','backend/tests']; from test_m1 import make_pdf; sys.stdout.buffer.write(make_pdf())"],{windowsHide:true});
+  const pdf=execFileSync(python,['-c',"import sys; sys.path[:0]=['backend','backend/tests']; from test_m1 import make_pdf; sys.stdout.buffer.write(make_pdf())"],{windowsHide:true});
   const file=info.outputPath('empty-library.pdf');await writeFile(file,pdf);
   const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'PDF 선택',exact:true}).click();await (await chooser).setFiles(file);
   const progress=page.getByRole('dialog',{name:'논문 처리'});await expect(progress.getByText('AI 연결 필요',{exact:true})).toBeVisible({timeout:30000});
@@ -212,7 +213,7 @@ test('M2: invalid LaTeX falls back visibly without crashing or requesting extern
 test('M1: PDF upload, authenticated SSE, offline original reader, duplicate detection and reopening', async ({page},testInfo)=>{
   await page.setViewportSize({width:720,height:960});
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
-  const pdf=execFileSync(resolve('.venv/Scripts/python.exe'),['-c',"import sys; sys.path[:0]=['backend','backend/tests']; from test_m1 import make_pdf; sys.stdout.buffer.write(make_pdf())"],{windowsHide:true});
+  const pdf=execFileSync(python,['-c',"import sys; sys.path[:0]=['backend','backend/tests']; from test_m1 import make_pdf; sys.stdout.buffer.write(make_pdf())"],{windowsHide:true});
   const source=testInfo.outputPath('한글 경로 논문.pdf');await writeFile(source,pdf);
   await page.goto('/?library=1');
   await expect(page.getByRole('heading',{name:'나의 논문 서재'})).toBeVisible();

@@ -16,6 +16,9 @@ from .providers import StructuredAdapter, flat, image_content
 
 
 def cli_enabled():
+    # macOS beta supports API keys. Do not expose the Windows CLI isolation and
+    # discovery implementation on a platform where it has not been ported.
+    if sys.platform != 'win32':return False
     # A build resource, not a user-switchable setting, gates distribution builds.
     policy=Path(__file__).with_name('build_policy.json')
     return json.loads(policy.read_text(encoding='utf-8')).get('cli_enabled',False) if policy.exists() else not getattr(sys,'frozen',False)

@@ -1,0 +1,55 @@
+name: macOS Apple Silicon beta
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 40
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Dependencies and native Python bundle
+        run: PYTHON=python bash scripts/setup-macos.sh
+      - name: Backend regression tests
+        run: npm run test:backend
+      - name: Packaged backend and native lifetime tests
+        run: |
+          .venv/bin/python scripts/smoke-sidecar.py src-tauri/resources/backend/paperduet-backend
+          PAPERDUET_TEST_SIDECAR="$PWD/src-tauri/resources/backend/paperduet-backend" cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Install browsers
+        run: npx playwright install chromium webkit
+      - name: WebKit and Chromium UI checks
+        run: npx playwright test --config playwright.macos.config.ts
+      - name: Build ad-hoc signed app and DMG
+        run: npx tauri build --bundles app,dmg
+      - name: Verify app signature and embedded backend
+        run: |
+          codesign --verify --deep --strict src-tauri/target/release/bundle/macos/PaperDuet.app
+          .venv/bin/python scripts/smoke-sidecar.py src-tauri/target/release/bundle/macos/PaperDuet.app/Contents/Resources/backend/paperduet-backend
+      - name: Upload beta and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaperDuet-macOS-arm64-beta
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            playwright-report/
+            test-results/
+          if-no-files-found: warn

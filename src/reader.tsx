@@ -7,6 +7,7 @@ import { Inline, NOTE_NAMES, ReaderBlock } from './blocks';
 import { BrandMark, Icon } from './icons';
 import { SummaryView } from './summary';
 import { resolveTheme } from './theme';
+import { primaryKey, shortcut } from './platform';
 import { ReadingContent, ReadingProgress, type ProgressHandle, type ReadingHandle } from './reading-content';
 import { Notebook } from './notebook';
 import { ReadingSettings } from './reading-settings';
@@ -178,10 +179,10 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
     function onKey(event: KeyboardEvent) {
       if(event.defaultPrevented||document.querySelector('dialog[open]')||(event.target as Element)?.closest('.floating-window'))return;
       if(event.key==='Escape'&&ask.visible){event.preventDefault();ask.close();return;}
-      if (event.ctrlKey && ['1', '2', '3'].includes(event.key)) {
+      if (primaryKey(event) && ['1', '2', '3'].includes(event.key)) {
         event.preventDefault(); setSettings(s => ({ ...s, view: ({ '1': 'en', '2': 'split', '3': 'ko' } as Record<string, View>)[event.key] }));
       }
-      if (event.ctrlKey && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); }
+      if (primaryKey(event) && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); }
       if (event.key === 'Escape') { setDrawer(false); setSearchOpen(false); menuRef.current?.focus(); }
     }
     window.addEventListener('keydown', onKey);
@@ -222,7 +223,7 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
       <div className="view-controls" role="group" aria-label="보기 모드">{([['en', '원문'], ['split', '대역'], ['ko', '번역']] as const).map(([mode, name]) =>
         <button key={mode} aria-pressed={settings.view === mode} onClick={() => setSettings(s => ({ ...s, view: mode }))}>{name}</button>)}</div>
       <span className="dock-separator" aria-hidden="true"/>
-      <button className="icon-button" onClick={() => setSearchOpen(s => !s)} aria-label="문서 검색" title="문서 검색 (Ctrl+F)"><Icon name="search"/></button>
+      <button className="icon-button" onClick={() => setSearchOpen(s => !s)} aria-label="문서 검색" title={`문서 검색 (${shortcut('F')})`}><Icon name="search"/></button>
       <ReadingSettings value={settings} onChange={setSettings} onGuide={onTutorial&&!offline?onTutorial:undefined}/>
       </div>
     </div><ReadingProgress ref={progress}/>
