@@ -55,7 +55,7 @@ macOS 전용 Playwright 검증은 공개 저장소에 없는 샘플 대신 작�
 
 실제 키체인 권한까지 검사하려면 Mac에서 `PAPERDUET_TEST_KEYCHAIN=1 npm run test:backend -- -k native_macos_keychain_roundtrip`을 실행합니다. 임의 이름의 테스트 항목 하나만 생성·조회·삭제하며 실제 앱의 API 키는 읽거나 수정하지 않습니다. OS 권한 창이 나올 수 있어 CI에서는 기본적으로 건너뜁니다.
 
-`.github/workflows/macos.yml`은 arm64 Mac 러너에서 의존성 설치, 백엔드·프로세스 수명 테스트, WebKit/Chromium 테스트, app/DMG 빌드, 서명 확인, 앱 내부 사이드카 스모크를 실행합니다. 결과는 Actions 아티팩트로만 보관하며 릴리스 게시·업로드는 하지 않습니다. 커밋·푸시하거나 해당 워크플로를 실행하기 전에는 원격 검증이 실행되지 않습니다.
+`.github/workflows/macos.yml`은 macOS 15 arm64 러너에서 의존성 설치, 백엔드·프로세스 수명 테스트, WebKit/Chromium 테스트, app/DMG 빌드, 서명 확인, 앱 내부 사이드카 스모크를 실행합니다. 현재 Playwright와 macOS 14용 고정 WebKit 사이의 [페이지 초기화 호환성 문제](https://github.com/microsoft/playwright/issues/42964) 때문에 CI는 macOS 15를 사용합니다. 앱의 배포 대상 설정은 macOS 14 이상이며, macOS 14에서의 실제 실행 여부는 별도로 확인해야 합니다. 결과는 Actions 아티팩트로만 보관하며 릴리스 게시·업로드는 하지 않습니다. 커밋·푸시하거나 해당 워크플로를 실행하기 전에는 원격 검증이 실행되지 않습니다.
 
 공개 전 실제 Mac에서 Finder로 앱 열기, 키체인 저장/조회/삭제·권한 거절, 한글 입력, PDF 드롭, 목차·선택·그림 질문·창 조절, 저장/내보내기 다이얼로그, 앱 종료/강제 종료 후 남은 백엔드가 없는지 확인해야 합니다. Playwright WebKit은 실제 WKWebView와 OS 권한 검사의 대체 수단이 아닙니다.
 

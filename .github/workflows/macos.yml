@@ -7,7 +7,9 @@ permissions:
   contents: read
 jobs:
   macos:
-    runs-on: macos-14
+    # Playwright 1.62+ cannot create pages with macOS 14's frozen WebKit build.
+    # https://github.com/microsoft/playwright/issues/42964
+    runs-on: macos-15
     timeout-minutes: 40
     env:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
@@ -42,7 +44,11 @@ jobs:
           .venv/bin/python scripts/smoke-sidecar.py src-tauri/resources/backend/paperduet-backend
           PAPERDUET_TEST_SIDECAR="$PWD/src-tauri/resources/backend/paperduet-backend" cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Install browsers
-        run: npx playwright install chromium webkit
+        run: |
+          sw_vers
+          uname -m
+          npx playwright --version
+          npx playwright install chromium webkit
       - name: WebKit and Chromium UI checks
         run: npx playwright test --config playwright.macos.config.ts
       - name: Build ad-hoc signed app and DMG
