@@ -124,10 +124,15 @@ def test_api_settings_and_position_persistence(api):
 def test_real_process_readiness_and_loopback_api(tmp_path):
     token = secrets.token_hex(32)
     env = {**os.environ, "PAPERDUET_SESSION_TOKEN": token, "PAPERDUET_DATA_DIR": str(tmp_path / "실제 한글 경로"), "PAPERDUET_START_GATE": "1"}
-    process = subprocess.Popen([sys.executable, str(ROOT / "backend/entrypoint.py")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process = subprocess.Popen([sys.executable, str(ROOT / "backend/entrypoint.py")], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                               start_new_session=sys.platform != 'win32')
     try:
-        process.stdin.write(b"start\n"); process.stdin.flush()
-        ready = json.loads(process.stdout.readline())
+        # macOS owns an isolated group and watches this pipe until the parent exits.
+        gate = b"start\n" if sys.platform == 'win32' else f"start {process.pid}\n".encode()
+        process.stdin.write(gate); process.stdin.flush()
+        ready_line = process.stdout.readline()
+        assert ready_line, 'Backend exited before reporting readiness'
+        ready = json.loads(ready_line)
         assert set(ready) == {"event", "port"}
         base = f"http://127.0.0.1:{ready['port']}"
         assert httpx.get(base + "/health").status_code == 401

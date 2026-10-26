@@ -27,6 +27,11 @@ jobs:
           workspaces: src-tauri
       - name: Dependencies and native Python bundle
         run: PYTHON=python bash scripts/setup-macos.sh
+      - name: Download independent golden PDF for backend tests
+        run: |
+          mkdir -p artifacts/m1
+          curl --fail --location --retry 3 --retry-all-errors --connect-timeout 30 --max-time 300 \
+            --output artifacts/m1/rex-omni.pdf https://arxiv.org/pdf/2510.12798v1
       - name: Backend regression tests
         run: npm run test:backend
       - name: Packaged backend and native lifetime tests
