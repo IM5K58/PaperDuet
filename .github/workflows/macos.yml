@@ -34,6 +34,9 @@ jobs:
             --output artifacts/m1/rex-omni.pdf https://arxiv.org/pdf/2510.12798v1
       - name: Backend regression tests
         run: npm run test:backend
+      # cargo test does not run Tauri's beforeBuildCommand hook.
+      - name: Build frontend for native tests
+        run: npm run build:web
       - name: Packaged backend and native lifetime tests
         run: |
           .venv/bin/python scripts/smoke-sidecar.py src-tauri/resources/backend/paperduet-backend
