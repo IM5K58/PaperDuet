@@ -39,6 +39,27 @@ def overlap(rect, region):
     return r.get_area() > 0 and (r & fitz.Rect(region)).get_area() / r.get_area() > .55
 
 
+def visible_drawings(page):
+    """Bound vector artwork by the PDF clip stack, retaining flat table rules."""
+    bounds=page.rect*page.derotation_matrix
+    clips=[];result=[]
+    for drawing in page.get_drawings(extended=True):
+        level=drawing['level']
+        while clips and clips[-1][0]>=level:clips.pop()
+        clip=clips[-1][1] if clips else bounds
+        if drawing['type']=='clip':
+            clips.append((level,fitz.Rect(drawing['scissor'])&clip))
+            continue
+        if drawing['type']=='group':continue
+        if clip.is_empty:continue
+        rect=drawing['rect']
+        x0,y0=max(rect.x0,clip.x0),max(rect.y0,clip.y0)
+        x1,y1=min(rect.x1,clip.x1),min(rect.y1,clip.y1)
+        if x1<x0 or y1<y0:continue
+        result.append({**drawing,'rect':fitz.Rect(x0,y0,x1,y1)})
+    return result
+
+
 def lines_of(page):
     result = []
     for bi, block in enumerate(page.get_text("dict", flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]):
@@ -402,7 +423,7 @@ class PyMuPDFParser:
                     captions.append({"kind":"tab" if match[1].lower()=="table" else "fig","n":("Table " if match[1].lower()=="table" else "Figure ")+match[2],
                                      "bbox":list(union([l["bbox"] for l in group])),"text":text[match.end():].strip(),"group":group,
                                      "punctuated":bool(match[3])})
-            drawings=page.get_drawings()
+            drawings=visible_drawings(page)
             raster_graphics=[fitz.Rect(i["bbox"]) for i in page.get_image_info() if fitz.Rect(i["bbox"]).get_area()>80]
             graphics=list(raster_graphics)
             graphics += [d["rect"] for d in drawings if d["rect"].width>8 and d["rect"].height>8 and d["rect"].height<height*.85]
@@ -450,7 +471,8 @@ class PyMuPDFParser:
                             region |= fitz.Rect(t.bbox)
                 else:
                     previous=max([c["bbox"][3] for c in captions if c["bbox"][3]<cap.y0 and same_column(c['bbox'])]+[r[3] for r in excluded if r[3]<cap.y0 and same_column(r)] or [height*.085])
-                    candidates=[g for g in graphics if g.y0>=previous-2 and g.y1<=cap.y0+2 and g.x1>cap.x0 and g.x0<cap.x1]
+                    candidates=[g for g in graphics if g.y0>=previous-2 and g.y1<=cap.y0+2 and g.x1>cap.x0 and g.x0<cap.x1
+                                and not any(overlap(g,r) for r in excluded)]
                     if candidates:
                         # Stop at a genuine body paragraph between artwork and caption.
                         nearest=max(g.y1 for g in candidates)
@@ -459,14 +481,23 @@ class PyMuPDFParser:
                         candidates=[g for g in candidates if g.y1>start and g.y0>=start-2]
                     # Captions may precede their artwork. Prefer a close lower
                     # graphic only when no body paragraph lies between them.
+                    # When artwork exists on both sides, a small gap difference
+                    # does not outweigh the supported picture above the caption.
                     next_caption=min([c['bbox'][1] for c in captions if c is not caption and c['bbox'][1]>cap.y1 and same_column(c['bbox'])] or [height])
-                    after=[g for g in graphics if cap.y1-2<=g.y0<next_caption and g.y1<=next_caption and g.x1>cap.x0 and g.x0<cap.x1]
+                    after=[g for g in graphics if cap.y1-2<=g.y0<next_caption and g.y1<=next_caption and g.x1>cap.x0 and g.x0<cap.x1
+                           and not any(overlap(g,r) for r in excluded)]
                     nearest_after=min((g.y0 for g in after),default=height)
                     barriers=[l['bbox'][1] for l in lines if same_column(l['bbox']) and l['bbox'][1]>=cap.y1 and l['bbox'][3]<=nearest_after and len(l['text'])>55 and l['size']>=body_size-.25]
-                    if after and nearest_after-cap.y1<55 and not barriers and (not candidates or nearest_after-cap.y1<cap.y0-max(g.y1 for g in candidates)):
+                    if after and nearest_after-cap.y1<55 and not barriers and (not candidates or
+                            (nearest_after>=cap.y1 and nearest_after-cap.y1+8<cap.y0-max(g.y1 for g in candidates))):
                         end=min([l['bbox'][1] for l in lines if same_column(l['bbox']) and l['bbox'][1]>nearest_after and len(l['text'])>55 and l['size']>=body_size-.25 and not any(overlap(l['bbox'],g) for g in after)] or [next_caption])
-                        candidates=[g for g in after if g.y0<end and g.y1<=end]
-                        below=True
+                        following=[g for g in after if g.y0<end and g.y1<=end]
+                        # A lower path can begin inside the caption but extend
+                        # through body text. Reject it without discarding the
+                        # already supported artwork above the caption.
+                        if following:
+                            candidates=following
+                            below=True
                     if not candidates and caption['kind']=='fig':
                         # Do not invent a picture from an arbitrary prose crop.
                         # Unmatched raster/vector artwork is retained below.

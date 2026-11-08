@@ -432,6 +432,11 @@ def test_visualad_regression_if_available(tmp_path):
     assert [b.n for b in blocks if b.type=='fig']==[f'Figure {n}' for n in range(1,7)]
     assert len([b for b in blocks if b.type=='tab'])==5
     assert {b.n for b in blocks if b.type=='eq'}=={f'({i})' for i in range(1,14)}
+    figures={b.n:s for b,s in zip(blocks,sources) if b.type=='fig'}
+    # The clipped canvas in the right column must not swallow equation (13)
+    # or prose on the left. Figure 6 must not reuse Figure 5's artwork.
+    assert figures['Figure 3']['region'][0]>306
+    assert figures['Figure 6']['region'][1]>figures['Figure 5']['region'][3]
     first=next(s for b,s in zip(blocks,sources) if b.n=='Figure 1')
     assert all(not overlap(s['bbox'],first['region']) for b,s in zip(blocks,sources) if b.page==1 and b.type=='p')
     for b,s in zip(blocks,sources):

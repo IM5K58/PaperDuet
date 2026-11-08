@@ -152,7 +152,7 @@ def test_only_untouched_previews_get_new_extraction_and_new_page_cache(tmp_path)
     with store.connect() as db:
         db.execute("INSERT INTO documents(id,title,status,source_kind) VALUES('preview','Preview','awaiting_ai','pdf')")
         db.execute('INSERT INTO jobs(id,doc_id,stage,status,checkpoint) VALUES(?,?,?,?,?)',
-                   ('preview','preview','Glossary','awaiting_ai',json.dumps({'parser_revision':3,'completed_stages':['Ingest','Extract','Structure']})))
+                   ('preview','preview','Glossary','awaiting_ai',json.dumps({'parser_revision':4,'completed_stages':['Ingest','Extract','Structure']})))
     with store.connect() as db:
         before=[tuple(row) for row in db.execute('SELECT id,payload FROM blocks WHERE doc_id=?',(doc_id,))]
     pipeline=Pipeline(store,None)
@@ -160,8 +160,8 @@ def test_only_untouched_previews_get_new_extraction_and_new_page_cache(tmp_path)
     pipeline.start=started.append
     asyncio.run(pipeline.recover())
     checkpoint=store.job('preview')['checkpoint']
-    assert checkpoint['parser_revision']==PARSER_REVISION==4
+    assert checkpoint['parser_revision']==PARSER_REVISION==5
     assert checkpoint['reextract'] and checkpoint['completed_stages']==['Ingest']
-    assert PAGE_CACHE=='pages-v4' and 'preview' in started
+    assert PAGE_CACHE=='pages-v5' and 'preview' in started
     with store.connect() as db:
         assert [tuple(row) for row in db.execute('SELECT id,payload FROM blocks WHERE doc_id=?',(doc_id,))]==before

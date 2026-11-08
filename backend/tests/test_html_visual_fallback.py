@@ -74,6 +74,20 @@ def test_label_embedded_in_caption_is_usable_without_changing_html_label(tmp_pat
     assert blocks[0].n is None and blocks[0].caption_en=='Figure 1: Original diagram overview.'
 
 
+def test_pdf_supplement_uses_the_visible_bounds_of_a_clipped_vector_canvas(tmp_path):
+    def populate(page,index):
+        with fitz.open() as source:
+            canvas=source.new_page(width=500,height=200)
+            canvas.draw_rect(canvas.rect,color=None,fill=(1,1,1))
+            canvas.draw_rect(fitz.Rect(220,40,350,140),color=None,fill=(.2,.4,.8))
+            page.show_pdf_page(fitz.Rect(320,180,545,340),source,0,clip=fitz.Rect(200,20,400,180),keep_proportion=False)
+        page.insert_text((320,360),'Figure 1: Original diagram overview.',fontsize=9)
+    path=pdf_file(tmp_path,populate)
+    blocks=[visual()];sources=[provenance()]
+    assert resolve_pdf_visuals(PyMuPDFParser(),path,blocks,sources,{'b0'},tmp_path/'crops')=={'b0'}
+    assert sources[0]['region'][0]>=320 and sources[0]['region'][2]<=545
+
+
 @pytest.mark.parametrize('caption',['Figure 1: Original diagram result 43.','Figure 2: Original diagram overview.','Figure 1: Original x<sup>2</sup> diagram.'])
 def test_inconsistent_caption_number_or_scientific_script_rejects_without_mutation(tmp_path,caption):
     path=pdf_file(tmp_path,one_figure)

@@ -100,6 +100,58 @@ def test_image_without_caption_is_preserved_without_consuming_body_text(tmp_path
     assert any(item.get('en')==body for item in items if item['type']=='p')
 
 
+def test_rejected_lower_graphic_does_not_discard_the_figure_above_a_caption(tmp_path):
+    source=fitz.Rect(50,100,545,200)
+    body='The independent body paragraph must remain outside the source artwork.'
+    def populate(page):
+        image(page,source)
+        page.insert_text((50,225),'Figure 1: The supported illustration above this caption.',fontsize=9)
+        page.draw_rect(fitz.Rect(50,226,290,400),color=(0,0,0),fill=(.9,.9,.9))
+        page.insert_text((320,280),body,fontsize=10)
+    items=extract(tmp_path,populate,width=700)
+    figure=next(item for item in items if item['type']=='fig' and item.get('n')=='Figure 1')
+    assert fitz.Rect(figure['region']).contains(source)
+    assert figure['region'][3]<225
+    assert any(body in item.get('en','') for item in items if item['type']=='p')
+
+
+def test_a_wide_figure_is_not_reused_by_a_later_column_caption(tmp_path):
+    wide=fitz.Rect(50,180,545,300)
+    narrow=fitz.Rect(50,380,285,480)
+    def populate(page):
+        image(page,wide);image(page,narrow)
+        page.insert_text((50,330),'Figure 1: A wide illustration with a caption that stretches across both columns of the source page.',fontsize=9)
+        page.insert_text((50,500),'Figure 2: Separate lower illustration.',fontsize=9)
+        for x in (50,320):
+            for y in (600,630,660):page.insert_text((x,y),'Several ordinary words belong in this body column.',fontsize=9)
+    items=extract(tmp_path,populate)
+    figures={item.get('n'):item for item in items if item['type']=='fig'}
+    assert set(figures)=={'Figure 1','Figure 2'}
+    assert fitz.Rect(figures['Figure 1']['region']).contains(wide)
+    assert fitz.Rect(figures['Figure 2']['region']).contains(narrow)
+    assert figures['Figure 2']['region'][1]>wide.y1
+    assert figures['Figure 2']['region'][2]<wide.x1
+
+
+def test_clipped_vector_canvas_does_not_consume_prose_in_the_other_column(tmp_path):
+    target=fitz.Rect(320,180,545,340)
+    body='The independent prose in the left column remains searchable and complete.'
+    def populate(page):
+        with fitz.open() as source:
+            canvas=source.new_page(width=500,height=200)
+            canvas.draw_rect(canvas.rect,color=None,fill=(1,1,1))
+            canvas.draw_rect(fitz.Rect(220,40,350,140),color=None,fill=(.2,.4,.8))
+            page.show_pdf_page(target,source,0,clip=fitz.Rect(200,20,400,180),keep_proportion=False)
+        page.insert_text((320,360),'Figure 1: A clipped source canvas.',fontsize=9)
+        page.insert_textbox(fitz.Rect(50,180,290,340),body,fontsize=10)
+    items=extract(tmp_path,populate)
+    figure=next(item for item in items if item['type']=='fig' and item.get('n')=='Figure 1')
+    region=fitz.Rect(figure['region'])
+    assert region.x0>=target.x0-.1 and region.x1<=target.x1+.1
+    assert region.contains(target)
+    assert any(body in item.get('en','') for item in items if item['type']=='p')
+
+
 @pytest.mark.parametrize('baseline',[360,500])
 def test_body_reference_is_not_mistaken_for_a_punctuation_free_caption(tmp_path,baseline):
     reference='Figure 1 shows that the comparison must be read together with the methods.'

@@ -95,8 +95,8 @@ def atomic_json(path: Path, data):
 BUSY = {'queued', 'running', 'batch_waiting'}
 # Answers a work unit handles itself; every other provider error pauses the job.
 SOFT = {'AI_INVALID_JSON', 'AI_OUTPUT_LIMIT'}
-PARSER_REVISION = 4  # 4: figure regions, orphan images and script positioning
-PAGE_CACHE = 'pages-v4'
+PARSER_REVISION = 5  # 5: clipped vector bounds and stable caption/artwork association
+PAGE_CACHE = 'pages-v5'
 COMPLETION_REFRESHED = 'completion_refreshed_1'  # app_settings key: legacy completion re-derived once
 MISSING = object()
 
@@ -460,7 +460,7 @@ class Pipeline:
             for i in range(metadata['page_count']):
                 if self.paused(doc_id): return
                 revision=checkpoint.get('parser_revision',1)
-                cache=directory/(PAGE_CACHE if revision>=4 else 'pages-v2' if revision>=2 else 'pages')/f'{i:04d}.json'
+                cache=directory/(PAGE_CACHE if revision>=5 else 'pages-v4' if revision>=4 else 'pages-v2' if revision>=2 else 'pages')/f'{i:04d}.json'
                 self.store.update_job(doc_id,'Extract','running',i/metadata['page_count']*.25,error=None)
                 if cache.exists():
                     result=json.loads(cache.read_text(encoding='utf-8'))

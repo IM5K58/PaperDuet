@@ -14,7 +14,7 @@ from pathlib import Path
 import pymupdf as fitz
 from bs4 import BeautifulSoup,NavigableString
 
-from .pdf_parser import PDF_LOCK,cluster_graphics,lines_of,save_crop
+from .pdf_parser import PDF_LOCK,cluster_graphics,lines_of,save_crop,visible_drawings
 
 
 _LABEL=re.compile(r'^(Figure|Fig\.?|Table)\s*([A-Za-z]?\s*\d+(?:\.\d+)*[a-z]?)(?=\s|[:.]|$)\s*[:.]?\s*',re.I)
@@ -141,7 +141,7 @@ def _safe_region(pdf,candidate,source,candidates,identity):
     region &= page.rect
     images=[fitz.Rect(item['bbox'])&page.rect for item in page.get_image_info()]
     images=[r for r in images if r.width>=12 and r.height>=12 and r.get_area()>=300]
-    drawings=page.get_drawings()
+    drawings=visible_drawings(page)
     vector=[fitz.Rect(d['rect']) for d in drawings if d['rect'].width>8 and d['rect'].height>8]
     thin=[(fitz.Rect(d['rect'])+(-.5,-.5,.5,.5),len(d['items'])) for d in drawings
           if max(d['rect'].width,d['rect'].height)>8 and min(d['rect'].width,d['rect'].height)<=8]
