@@ -1,6 +1,6 @@
 [package]
 name = "paperduet"
-version = "0.10.1"
+version = "0.10.2"
 description = "PaperDuet bilingual paper reader"
 edition = "2021"
 rust-version = "1.85"
@@ -20,6 +20,9 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 
 [features]
 default = ["custom-protocol"]

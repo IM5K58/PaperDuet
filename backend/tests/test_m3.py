@@ -181,11 +181,13 @@ def test_thread_titles_rename_persist_validate_and_preserve_existing_conversatio
     # Simulate an existing version-8 database and keep its conversation on upgrade.
     with store.connect() as db:
         db.execute('ALTER TABLE threads DROP COLUMN title')
-        db.execute('DELETE FROM schema_migrations WHERE version=9')
+        db.execute('DROP TABLE document_reanalyses')
+        db.execute('DELETE FROM schema_migrations WHERE version>=9')
         db.execute('PRAGMA user_version=8')
     upgraded=Store(store.data_dir,FIXTURE)
     with upgraded.connect() as db:
-        assert db.execute('PRAGMA user_version').fetchone()[0]==9
+        from paperduet.store import SCHEMA_VERSION
+        assert db.execute('PRAGMA user_version').fetchone()[0]==SCHEMA_VERSION
         assert db.execute('SELECT title FROM threads WHERE id=?',(tid,)).fetchone()[0]==''
         assert db.execute('SELECT COUNT(*) FROM messages WHERE thread_id=?',(tid,)).fetchone()[0]==2
 

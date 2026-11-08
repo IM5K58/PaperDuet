@@ -18,7 +18,11 @@ const LINKS:[&str;4]=["https://github.com/IM5K58/PaperDuet/releases/latest","htt
 pub fn open_link(window:tauri::WebviewWindow,url:String)->Result<(),String>{
     allowed(&window)?;
     if !LINKS.contains(&url.as_str()){return Err("열 수 없는 주소입니다.".into());}
-    std::process::Command::new("explorer.exe").arg(&url).spawn().map(|_|()).map_err(|_|"브라우저를 열지 못했습니다.".into())
+    #[cfg(windows)]
+    let mut command = std::process::Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("/usr/bin/open");
+    command.arg(&url).spawn().map(|_|()).map_err(|_|"브라우저를 열지 못했습니다.".into())
 }
 fn valid_document_id(id:&str)->bool{
     !id.is_empty()&&!matches!(id,"."|"..")&&id.bytes().all(|b|b.is_ascii_alphanumeric()||matches!(b,b'-'|b'_'|b'.'))

@@ -103,7 +103,7 @@ def test_invalid_json_is_a_request_error_and_usage_is_recorded(tmp_path):
     assert sum(u['tokens_in'] for u in job['usage'])==20
 
 
-def test_missing_translation_can_resume_without_retranslating_short_or_changed_text(tmp_path):
+def test_missing_translation_can_resume_without_retranslating_saved_text(tmp_path):
     store,doc_id=seed(tmp_path)
     block=next(b for b in store.document(doc_id).blocks if b.id=='b0001');block.ko=''
     store.save_blocks(doc_id,[block])
@@ -112,7 +112,7 @@ def test_missing_translation_can_resume_without_retranslating_short_or_changed_t
         async def json(self,stage,model,payload,image=None):
             if stage!='translate':return await super().json(stage,model,payload,image)
             self.calls.append((stage,payload))
-            return {'blocks':[{'id':b['id'],'ko':'' if self.empty else '끝'} for b in payload['blocks']]},{}
+            return {'blocks':[{'id':b['id'],'ko':'' if self.empty else 'Nova를 제안하고 42.0을 보고한다. Table 1 참조.'} for b in payload['blocks']]},{}
     provider=Translator();run(store,doc_id,provider)
     job=store.job(doc_id)
     assert job['status']=='ready_to_translate' and job['checkpoint']['untranslated_count']==1
@@ -155,7 +155,8 @@ def test_v2_database_migration_preserves_existing_m1_doc_and_position(tmp_path):
     store=Store(tmp_path,FIXTURE)
     assert store.document('old').reading_position.offset==19
     assert store.pipeline_options().translate_model=='custom-model' and store.pipeline_options().annotate_model=='claude-sonnet-5'
-    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==9
+    from paperduet.store import SCHEMA_VERSION
+    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==SCHEMA_VERSION
 
 
 def test_term_regeneration_relocates_to_first_use_preserving_note_id(tmp_path):

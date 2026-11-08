@@ -2,9 +2,13 @@ use crate::job::Job;
 use serde::Serialize;
 use std::{
     io::{BufRead, BufReader, Read, Write}, net::{SocketAddr, TcpStream},
-    os::windows::process::CommandExt, path::PathBuf, process::{Child, Command, Stdio},
+    path::PathBuf, process::{Child, Command, Stdio},
     sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex}, thread, time::{Duration, Instant},
 };
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 #[derive(Clone, Serialize)]
 pub struct Connection { pub port: u16, pub token: String, pub generation: u32 }
@@ -71,14 +75,17 @@ impl Manager {
         getrandom::fill(&mut bytes).map_err(|_| ())?;
         let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         let job = Job::new().map_err(|_| ())?;
-        let mut child = Command::new(exe)
-            .current_dir(exe.parent().ok_or(())?)
+        let mut command = Command::new(exe);
+        command.current_dir(exe.parent().ok_or(())?)
             .env("PAPERDUET_SESSION_TOKEN", &token).env("PAPERDUET_ORIGIN", origin)
             .env("PAPERDUET_DATA_DIR", data_dir).env("PAPERDUET_START_GATE", "1")
             .env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8")
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .spawn().map_err(|_| ())?;
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        #[cfg(windows)]
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut child = command.spawn().map_err(|_| ())?;
         if job.assign(&child).is_err() {
             let _ = child.kill(); let _ = child.wait(); return Err(());
         }
@@ -88,7 +95,10 @@ impl Manager {
             *slot = Some(job);
         }
         let result = (|| {
-            child.stdin.take().ok_or(())?.write_all(b"start\n").map_err(|_| ())?;
+            let gate = if cfg!(unix) { format!("start {}\n", child.id()) } else { "start\n".into() };
+            // Keep the write end alive for the entire child lifetime on macOS.
+            // EOF tells Python that even an ungraceful desktop exit is final.
+            child.stdin.as_mut().ok_or(())?.write_all(gate.as_bytes()).map_err(|_| ())?;
             let output = child.stdout.take().ok_or(())?;
             let (send, receive) = mpsc::channel();
             thread::spawn(move || {
@@ -133,6 +143,26 @@ fn health(connection: &Connection, origin: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn parent_pipe_eof_stops_packaged_backend() {
+        let Some(exe) = std::env::var_os("PAPERDUET_TEST_SIDECAR") else { return; };
+        let data = tempfile::tempdir().unwrap();
+        let manager = Manager {
+            connection: Arc::new(Mutex::new(Err("test".into()))),
+            stop: Arc::new(AtomicBool::new(false)), job: Arc::new(Mutex::new(None)),
+        };
+        let (mut child, connection) = manager.launch(&PathBuf::from(exe), &data.path().to_path_buf(), "tauri://localhost", 0).unwrap();
+        assert!(health(&connection, "tauri://localhost"));
+        drop(child.stdin.take()); // The same EOF as a desktop crash, without killing the test.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "Backend survived its parent lifetime pipe");
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!health(&connection, "tauri://localhost"));
+        manager.shutdown();
+    }
     #[test]
     fn packaged_backend_restart_and_shutdown() {
         let Some(exe) = std::env::var_os("PAPERDUET_TEST_SIDECAR") else {

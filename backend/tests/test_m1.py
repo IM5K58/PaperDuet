@@ -167,7 +167,8 @@ def test_failed_stage_resumes_cached_extraction_without_retranslating(tmp_path):
     with client:
         doc_id=client.post('/documents',content=make_pdf(3),headers={'Content-Type':'application/pdf'}).json()['doc_id']
         wait_job(client,doc_id,{'awaiting_ai'})
-        cache=tmp_path/'documents'/doc_id/'pages-v2'/'0000.json'
+        from paperduet.pipeline import PAGE_CACHE
+        cache=tmp_path/'documents'/doc_id/PAGE_CACHE/'0000.json'
         before=cache.stat().st_mtime_ns
         vault.set('test-key-for-resume')
         provider.fail_after=3
@@ -269,7 +270,8 @@ def test_migration_from_m0_preserves_fixture_and_reader_settings(tmp_path):
     store=Store(tmp_path,FIXTURE)
     assert store.settings().theme=='dark' and store.settings().font_size==19
     assert len(store.document('rex-omni').blocks)==285
-    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==9
+    from paperduet.store import SCHEMA_VERSION
+    with store.connect() as db:assert db.execute('PRAGMA user_version').fetchone()[0]==SCHEMA_VERSION
 
 
 def test_multimodal_request_and_upstream_error_are_secret_safe(tmp_path):
@@ -292,7 +294,7 @@ def test_multimodal_request_and_upstream_error_are_secret_safe(tmp_path):
 
 
 @pytest.mark.sample
-def test_restore_keeps_returned_numbers_without_a_quality_retry(tmp_path):
+def test_restore_preserves_source_when_ai_swaps_numeric_columns(tmp_path):
     from paperduet.pipeline import Pipeline
     store=Store(tmp_path,FIXTURE)
     class SwappingProvider:
@@ -305,10 +307,11 @@ def test_restore_keeps_returned_numbers_without_a_quality_retry(tmp_path):
         table=Table(header=[[Cell(text_en='Model'),Cell(text_en='A'),Cell(text_en='B')]],body=[[Cell(text_en='X'),Cell(text_en='1',numeric=True),Cell(text_en='2',numeric=True)]]))
     block=source.model_copy(deep=True)
     asyncio.run(pipeline.restore_block('rex-omni',block,source,PipelineOptions()))
-    assert provider.calls==1 and block.qa_flags==[]
-    assert [c.text_en for c in block.table.body[0]]==['X','2','1']
+    assert provider.calls==2 and block.qa_flags==[]
+    assert block.restore_error=='numeric_mismatch'
+    assert [c.text_en for c in block.table.body[0]]==['X','1','2']
     assert [c.text_en for c in source.table.body[0]]==['X','1','2']
-    with store.connect() as db:assert db.execute('SELECT COUNT(*) FROM ai_usage').fetchone()[0]==1
+    with store.connect() as db:assert db.execute('SELECT COUNT(*) FROM ai_usage').fetchone()[0]==2
 
 
 def test_user_pause_survives_app_restart_until_explicit_resume(tmp_path):

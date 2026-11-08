@@ -1,7 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(not(windows))]
-compile_error!("PaperDuet v1 targets Windows only.");
+#[cfg(not(any(windows, target_os = "macos")))]
+compile_error!("PaperDuet supports Windows and macOS.");
+#[cfg(windows)]
+mod job;
+#[cfg(target_os = "macos")]
+#[path = "job_unix.rs"]
 mod job;
 mod sidecar;
 mod desktop;
@@ -17,10 +21,11 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let executable = format!("paperduet-backend{}", std::env::consts::EXE_SUFFIX);
             let backend = if cfg!(debug_assertions) {
-                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/backend/paperduet-backend.exe")
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/backend").join(&executable)
             } else {
-                app.path().resource_dir()?.join("backend/paperduet-backend.exe")
+                app.path().resource_dir()?.join("backend").join(&executable)
             };
             // The dev app keeps its own library: sharing the installed app's would upgrade it
             // to a schema the installed version cannot open.
@@ -34,7 +39,8 @@ fn main() {
             let data=desktop::location(&data,&location_file);
             app.manage(desktop::Desktop{location_file,selected:std::sync::Mutex::new(None),operation:std::sync::Mutex::new(false)});
             desktop::configure_updater(app.handle())?;
-            let origin = if cfg!(debug_assertions) { "http://127.0.0.1:1420" } else { "http://tauri.localhost" };
+            let origin = if cfg!(debug_assertions) { "http://127.0.0.1:1420" }
+                else if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" };
             app.manage(sidecar::Manager::start(backend, data, origin.into()));
             Ok(())
         })

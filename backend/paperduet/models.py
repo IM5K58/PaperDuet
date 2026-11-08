@@ -48,6 +48,10 @@ class Block(Model):
     en: str | None = None
     ko: str | None = None
     latex: str | None = None
+    restore_error: Literal["invalid", "numeric_mismatch"] | None = None
+    translation_error: Literal["source_mismatch", "invalid_response"] | None = None
+    ocr: bool | None = None
+    superseded_by: str | None = None
     table: Table | None = None
     image_path: str | None = None
     caption_en: str | None = None

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import creator from './assets/creator.png';
 import { Modal } from './connections';
 import { Icon } from './icons';
+import { credentialStore } from './platform';
 
 const LINKS = {
   releases: 'https://github.com/IM5K58/PaperDuet/releases/latest',
@@ -59,7 +60,7 @@ function Terms() {
     <h4>제3조 (데이터와 개인정보)</h4>
     <ol>
       <li>제작자는 이용자의 논문, 번역, 주석, AI 대화, 메모를 수집하지 않으며 별도 서버에 저장하지 않습니다. 이 데이터는 이용자의 PC에만 저장됩니다.</li>
-      <li>API 키는 Windows 자격 증명 관리자에만 저장되며 제작자에게 전송되지 않습니다.</li>
+      <li>API 키는 {credentialStore}에만 저장되며 제작자에게 전송되지 않습니다.</li>
       <li>이용자가 번역·주석·질문을 실행하면 그 내용이 이용자가 선택한 AI 제공자(Anthropic, OpenAI, Google 등)에 전송됩니다. 이 전송과 처리에는 해당 제공자의 약관과 개인정보 처리방침이 적용됩니다.</li>
       <li>앱은 새 버전을 확인하고 업데이트를 받기 위해 GitHub에 접속합니다. 이때 GitHub의 정책에 따라 접속 정보(IP 주소 등)가 처리될 수 있습니다.</li>
       <li>버그 제보 양식(Google Forms)에 적은 내용은 버그 확인과 답변에만 사용합니다. 꼭 필요한 경우가 아니면 개인정보를 적지 마세요.</li>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { request } from './api';
 import { ConnectionChoices, defaultModel, Modal, ModelSelect, ProviderPanel } from './connections';
 import { Icon } from './icons';
+import { primaryKey, shortcut } from './platform';
 import { FloatingWindow } from './floating-window';
 import { AskContext } from './ask-context';
 import { AskTranscript } from './ask-transcript';
@@ -46,7 +47,7 @@ export function useAsk(doc:Document|null,enabled=true) {
       if(fromText){cancelAnimationFrame(frame);frame=requestAnimationFrame(selection);}
     };
     const cancel=()=>{dragging=false;fromText=false;setSelected(null);};
-    const key=(e:KeyboardEvent)=>{if(e.ctrlKey&&e.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){e.preventDefault();const anchor=selectedAnchor();open(anchor?{kind:'text',anchor}:undefined);}};
+    const key=(e:KeyboardEvent)=>{if(primaryKey(e)&&e.key.toLowerCase()==='k'&&!document.querySelector('dialog[open]')){e.preventDefault();const anchor=selectedAnchor();open(anchor?{kind:'text',anchor}:undefined);}};
     document.addEventListener('selectionchange',selection);document.addEventListener('pointerdown',down,true);document.addEventListener('pointerup',up,true);document.addEventListener('pointercancel',cancel,true);window.addEventListener('blur',cancel);window.addEventListener('keydown',key);
     return()=>{cancelAnimationFrame(frame);document.removeEventListener('selectionchange',selection);document.removeEventListener('pointerdown',down,true);document.removeEventListener('pointerup',up,true);document.removeEventListener('pointercancel',cancel,true);window.removeEventListener('blur',cancel);window.removeEventListener('keydown',key);};
   },[enabled,!!doc,open]);
@@ -82,7 +83,7 @@ export function SelectionActions({anchor,onOpen}:{anchor:Anchor;onOpen:(anchor:A
     document.addEventListener('scroll',schedule,true);window.addEventListener('resize',schedule);window.visualViewport?.addEventListener('resize',schedule);window.visualViewport?.addEventListener('scroll',schedule);
     return()=>{cancelAnimationFrame(frame);observer.disconnect();document.removeEventListener('scroll',schedule,true);window.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('scroll',schedule);};
   },[anchor]);
-  return <div ref={menu} className="selection-actions" role="toolbar" aria-label="선택 텍스트 액션" data-placement={position?.side} style={{left:position?.left??0,top:position?.top??0,visibility:position?'visible':'hidden'}} onPointerDown={e=>e.preventDefault()} onMouseDown={e=>e.preventDefault()}><button onClick={()=>onOpen(anchor)}>Ask AI <kbd>Ctrl K</kbd></button></div>;
+  return <div ref={menu} className="selection-actions" role="toolbar" aria-label="선택 텍스트 액션" data-placement={position?.side} style={{left:position?.left??0,top:position?.top??0,visibility:position?'visible':'hidden'}} onPointerDown={e=>e.preventDefault()} onMouseDown={e=>e.preventDefault()}><button onClick={()=>onOpen(anchor)}>Ask AI <kbd>{shortcut('K')}</kbd></button></div>;
 }
 
 export function AskPanel({doc,selection,visible,activation,onClose,onSaved}:{doc:Document;selection:Anchor|null;visible:boolean;activation:number;onClose:()=>void;onSaved:()=>Promise<void>}) {
@@ -136,7 +137,7 @@ export function AskPanel({doc,selection,visible,activation,onClose,onSaved}:{doc
     <AskTranscript messages={messages} loaded={session.loaded} selected={!!anchor} granularity={granularity} elementRef={transcript} onScroll={onTranscriptScroll} noteKind={noteKind} onKind={setNoteKind} onCopy={copy} onNote={saveNote} onMemo={saveMemo}/>
     <div className="ask-composer"><div className="ask-target"><div><span>{anchor?(askTarget(anchor,doc)?.kind==='figure'?'선택한 그림':'선택한 내용'):'질문 대상 · 이 논문'}</span>{anchor&&<button className="icon-button" aria-label="선택 문장 해제" onClick={()=>{chat.update({anchor:null});textarea.current?.focus();}}><Icon name="close"/></button>}</div>{anchor&&<blockquote className="selected-quote">{anchor.text||block?.n||'선택한 문단'}</blockquote>}</div>
       <div className="preset-chips" role="group" aria-label="빠른 질문">{settings.presets.map(p=><button key={p.id} disabled={busy} aria-pressed={preset===p.id} onClick={()=>{chat.update({preset:p.id,question:p.instruction});textarea.current?.focus();}}>{p.label}</button>)}</div>
-      <label className="ask-input-label">질문<textarea ref={textarea} value={question} disabled={busy||!session.loaded} placeholder={anchor?'선택한 내용에서 어떤 부분이 궁금한가요?':'이 논문에 대해 질문하세요.'} maxLength={12000} rows={3} onChange={e=>chat.update({question:e.target.value,preset:''})} onKeyDown={e=>{if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();send();}}}/></label>
+      <label className="ask-input-label">질문<textarea ref={textarea} value={question} disabled={busy||!session.loaded} placeholder={anchor?'선택한 내용에서 어떤 부분이 궁금한가요?':'이 논문에 대해 질문하세요.'} maxLength={12000} rows={3} onChange={e=>chat.update({question:e.target.value,preset:''})} onKeyDown={e=>{if(primaryKey(e)&&e.key==='Enter'){e.preventDefault();send();}}}/></label>
       {error&&<p role="alert" className="error-message">{error}</p>}{notice&&<p role="status">{notice}</p>}
       <div className="dialog-actions">{busy?<button onClick={chat.stop}>응답 중지</button>:<><button className="primary-button" disabled={!ready||!session.loaded||!question.trim()} onClick={()=>send()}>질문 보내기</button>{threadId&&messages.some(m=>m.role==='user')&&<button onClick={()=>send(true)}>답변 재생성</button>}</>}</div>
       <AskContext key={session.key} body={chat.payload()} snapshot={snapshot} threadId={threadId} messageId={messages.filter(m=>m.role==='assistant').at(-1)?.id} visible={visible&&ready&&session.loaded}>{anchor&&<label className="context-toggle"><input type="checkbox" checked={full} disabled={busy} onChange={e=>chat.update({full:e.target.checked})}/>논문 전체 포함</label>}{block?.image_path&&<label className="context-toggle"><input type="checkbox" checked={includeImage} disabled={busy} onChange={e=>chat.update({includeImage:e.target.checked})}/>원본 이미지 첨부</label>}</AskContext>

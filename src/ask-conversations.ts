@@ -3,6 +3,7 @@ import { authorizedFetch, ERROR_TEXT, request } from './api';
 import type { ConnectionMode, Document, Provider } from './types';
 import { askTarget, targetAnchor, targetTitle, type Anchor } from './ask-target';
 import { readEvents } from './sse';
+import { combineSignals } from './abort';
 export type { Anchor } from './ask-target';
 
 export type Preset={id:string;label:string;instruction:string};
@@ -108,7 +109,7 @@ export function useAskConversations(doc:Document) {
     let messageId='';let done=false;
     const pendingMessage:Message={id:'pending-'+key,role:'user',content_md:body.question,status:'complete',tokens_in:null,tokens_out:null,context_snapshot:{}};
     try {
-      await request('/settings/ask',{method:'PUT',body:JSON.stringify(settings),signal:AbortSignal.any([abort.signal,AbortSignal.timeout(20000)])});
+      await request('/settings/ask',{method:'PUT',body:JSON.stringify(settings),signal:combineSignals([abort.signal,AbortSignal.timeout(20000)])});
       abort.signal.throwIfAborted();
       if(!regenerate)put(key,old=>({messages:[...old.messages,pendingMessage],question:'',preset:''}));
       const response=await authorizedFetch('/ask',{method:'POST',body:JSON.stringify(body),signal:abort.signal});

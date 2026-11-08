@@ -14,7 +14,9 @@ from markdownify import markdownify
 from .models import Block, Card, Cell, Document, Note, Table
 
 DOC_ID = "rex-omni"
-INLINE = {"b", "i", "sub", "sup", "code"}
+INLINE = {"b", "i", "sub", "sup", "code", "br"}
+MATH = re.compile(r"\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$|"
+    r"(?<![\\$])\$(?![\s$])(?:(?!</?(?:b|i|strong|em|sub|sup|code|span|br)(?=[\s/>]))[^\n$])+?(?<![\\\s])\$(?![$\d])",re.I)
 EQUATIONS = {
     "(1)": r"A_i = \frac{r_i-\operatorname{mean}(r_1,\ldots,r_G)}{\operatorname{std}(r_1,\ldots,r_G)}",
     "(2)": r"\mathcal{J}_{\mathrm{GRPO}}(\theta)=\frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\left[\min\left(\rho_{i,t}\hat{A}_{i,t},\operatorname{clip}(\rho_{i,t},1-\epsilon,1+\epsilon)\hat{A}_{i,t}\right)-\beta D_{\mathrm{KL}}[\pi_\theta\|\pi_{\mathrm{ref}}]\right]",
@@ -25,12 +27,23 @@ EQUATIONS = {
 
 
 def inline(source: str) -> str:
+    # HTML parsers otherwise consume comparisons such as \\(x<y\\) and
+    # everything following the apparent opening tag. Existing entities stay intact.
+    source = MATH.sub(lambda m: m[0].replace('<', '&lt;').replace('>', '&gt;'), source)
+    # Model output can contain literal comparisons inside code without HTML
+    # escaping. Treat code contents as text before parsing their outer tag.
+    source = re.sub(r'(<code\b[^>]*>)([\s\S]*?)(</code\s*>)',
+        lambda m: m[1]+m[2].replace('<','&lt;').replace('>','&gt;')+m[3], source, flags=re.I)
+    # An incomplete apparent tag is ordinary comparison text, not markup.
+    source = re.sub(r'<(?=[^<>]*(?:<|$))','&lt;',source)
     soup = BeautifulSoup(source, "html.parser")
     for tag in list(soup.find_all(True)):
+        if tag.name is None or tag.parent is None:
+            continue
         if tag.name in {"script", "style", "iframe"}:
             tag.decompose()
-        elif tag.name == "mark":
-            tag.name = "b"  # PRD inline allowlist: retain emphasis, strip legacy styling.
+        elif tag.name in {"mark", "strong", "em"}:
+            tag.name = "i" if tag.name == "em" else "b"
             tag.attrs = {}
         elif tag.name == "span" and "tok" in tag.get("class", []):
             tag.name = "code"
@@ -43,7 +56,10 @@ def inline(source: str) -> str:
 
 
 def plain(source: str) -> str:
-    return BeautifulSoup(source, "html.parser").get_text()
+    soup = BeautifulSoup(source, "html.parser")
+    for br in soup.find_all('br'):
+        br.replace_with('\n')
+    return soup.get_text()
 
 
 def parse_table(source: str) -> Table:

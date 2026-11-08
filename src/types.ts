@@ -6,6 +6,10 @@ export interface Block {
   type: 'sec' | 'sub' | 'ssub' | 'p' | 'li' | 'note' | 'card' | 'eq' | 'fig' | 'tab';
   section_path: string[]; page?: number; n?: string; en?: string; ko?: string; latex?: string;
   caption_en?: string; caption_ko?: string; image_path?: string;
+  restore_error?: 'invalid' | 'numeric_mismatch';
+  translation_error?: 'source_mismatch' | 'invalid_response';
+  ocr?: boolean;
+  superseded_by?: string;
   table?: { header: Cell[][]; body: Cell[][]; highlight_rows: number[]; best_cells: [number, number][] };
   card?: { body: string; explain_ko: string };
   note?: { kind: NoteKind; title: string; body_md: string; claim: 'stated' | 'interpretation' | 'mixed'; refs: string[]; origin: 'generated' | 'user' | 'ai_answer' };

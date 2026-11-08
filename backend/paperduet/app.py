@@ -10,15 +10,18 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse, Response
 from starlette.responses import StreamingResponse
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, StrictInt
 
 from .models import Model, Note, PipelineOptions, ReaderSettings, ReadingPosition
 from .store import Store
 from .pipeline import BUSY, Pipeline
-from .provider import ProviderError, WindowsVault
+from .provider import ProviderError, SystemVault
 from .adapter import inline
 from .providers import ProviderRegistry
 from .ask import AskService, AskInput, AskSettings
+from .reanalysis import OCR_MAX_PAGES, ReanalysisError, ReanalysisManager
+from .diagnostics import diagnose_document, document_source
+from .validation import translation_complete
 
 
 class ProviderInput(Model):
@@ -44,16 +47,26 @@ class BlockEdit(Model):
     note: Note | None = None
 
 
+class ReanalysisSelection(Model):
+    change_ids: list[str] = Field(min_length=1,max_length=10000)
+
+
+class OCRRequest(Model):
+    pages: list[StrictInt] = Field(min_length=1,max_length=OCR_MAX_PAGES)
+    language: Literal['eng','kor','eng+kor']='eng'
+
+
 def create_app(token: str, data_dir: Path, fixture: Path,
                origin: str = "http://tauri.localhost", *, vault=None, provider=None, parser=None) -> FastAPI:
     if len(token) < 32:
         raise ValueError("A strong session token is required")
     store = Store(data_dir, fixture)
-    vault = vault or WindowsVault()
+    vault = vault or SystemVault()
     registry=ProviderRegistry(store,vault)
     override=provider
     provider = provider or registry
     pipeline = Pipeline(store, provider, parser)
+    reanalysis = ReanalysisManager(store,pipeline)
     ask=AskService(store,registry,override if hasattr(override,'stream') else None)
 
     @asynccontextmanager
@@ -64,11 +77,19 @@ def create_app(token: str, data_dir: Path, fixture: Path,
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store, app.state.pipeline, app.state.ask = store, pipeline, ask
+    app.state.reanalysis = reanalysis
     app.state.active_writes=0
+    document_writes={}
 
     @app.exception_handler(ProviderError)
     async def provider_error(_request, error):
         return JSONResponse({"detail": str(error)}, status_code=503)
+
+    @app.exception_handler(ReanalysisError)
+    async def reanalysis_error(_request,error):
+        code=str(error)
+        status=404 if code=='REANALYSIS_NOT_FOUND' else 409 if code in {'JOB_BUSY','REANALYSIS_STALE','REANALYSIS_UNSUPPORTED'} else 422
+        return JSONResponse({'detail':code},status_code=status)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request: Request, _error: RequestValidationError):
@@ -103,7 +124,14 @@ def create_app(token: str, data_dir: Path, fixture: Path,
             if getattr(app.state,'maintenance',False) and writing and request.url.path!='/settings/storage/cancel':
                 return JSONResponse({'detail':'STORAGE_MAINTENANCE'},status_code=409,headers={'Access-Control-Allow-Origin':origin,'Cache-Control':'no-store'})
             if writing:app.state.active_writes+=1
-            try:response = await call_next(request)
+            parts=request.url.path.split('/')
+            document_lock=None
+            if writing and len(parts)>=3 and parts[1]=='documents' and parts[2] and not (len(parts)==4 and parts[3] in {'reanalysis','ocr'}):
+                document_lock=document_writes.setdefault(parts[2],asyncio.Lock())
+            try:
+                if document_lock:
+                    async with document_lock:response=await call_next(request)
+                else:response=await call_next(request)
             finally:
                 if writing:app.state.active_writes-=1
         response.headers["Cache-Control"] = "no-store"
@@ -140,6 +168,45 @@ def create_app(token: str, data_dir: Path, fixture: Path,
         if not store.delete_document(doc_id):
             raise HTTPException(404,'Document not found')
 
+    @app.post('/documents/{doc_id}/reanalysis')
+    async def create_reanalysis(doc_id: str):
+        try:
+            return await reanalysis.create(doc_id)
+        except ReanalysisError:
+            raise
+        except Exception:
+            raise HTTPException(422,'REANALYSIS_FAILED') from None
+
+    @app.get('/documents/{doc_id}/ocr')
+    async def ocr_candidates(doc_id: str):
+        try:return await asyncio.to_thread(reanalysis.ocr_candidates,doc_id)
+        except ReanalysisError:raise
+        except Exception:raise HTTPException(422,'OCR_FAILED') from None
+
+    @app.post('/documents/{doc_id}/ocr')
+    async def recognize_pages(doc_id: str,value: OCRRequest):
+        try:return await reanalysis.create_ocr(doc_id,value.pages,value.language)
+        except ReanalysisError:raise
+        except Exception:raise HTTPException(422,'OCR_FAILED') from None
+
+    @app.get('/documents/{doc_id}/reanalysis/{preview_id}')
+    def reanalysis_preview(doc_id: str,preview_id: str):
+        return reanalysis.get(doc_id,preview_id)
+
+    @app.get('/documents/{doc_id}/reanalysis/{preview_id}/changes/{change_id}/image')
+    def reanalysis_image(doc_id: str,preview_id: str,change_id: str,side: Literal['before','after']):
+        data=reanalysis.image(doc_id,preview_id,change_id,side)
+        return {'data_url':'data:image/png;base64,'+base64.b64encode(data).decode('ascii')}
+
+    @app.post('/documents/{doc_id}/reanalysis/{preview_id}/apply')
+    async def apply_reanalysis(doc_id: str,preview_id: str,value: ReanalysisSelection):
+        try:
+            return await reanalysis.apply(doc_id,preview_id,value.change_ids)
+        except ReanalysisError:
+            raise
+        except Exception:
+            raise HTTPException(422,'REANALYSIS_FAILED') from None
+
     @app.get('/documents/{doc_id}/progress')
     async def progress(doc_id: str, request: Request):
         if not store.job(doc_id):
@@ -170,6 +237,25 @@ def create_app(token: str, data_dir: Path, fixture: Path,
         result=pipeline.estimate(doc_id)
         if result is None: raise HTTPException(404,'Document not found')
         return result
+
+    @app.get('/documents/{doc_id}/diagnostics')
+    async def diagnostics(doc_id: str):
+        try:return await asyncio.to_thread(diagnose_document,store,doc_id)
+        except ValueError:
+            raise HTTPException(404,'DOCUMENT_NOT_FOUND') from None
+
+    @app.get('/documents/{doc_id}/source')
+    async def original_document(doc_id: str):
+        try:return await asyncio.to_thread(document_source,store,doc_id)
+        except ValueError:
+            raise HTTPException(404,'DOCUMENT_NOT_FOUND') from None
+
+    @app.get('/documents/{doc_id}/blocks/{block_id}/source')
+    async def original_block(doc_id: str,block_id: str):
+        from .source_compare import locate_source
+        try:return await asyncio.to_thread(locate_source,store,doc_id,block_id)
+        except ValueError as error:
+            raise HTTPException(404,'DOCUMENT_NOT_FOUND' if str(error)=='DOCUMENT_NOT_FOUND' else 'BLOCK_NOT_FOUND') from None
 
     @app.post('/documents/{doc_id}/resume', status_code=202)
     async def resume(doc_id: str, options: PipelineOptions):
@@ -219,6 +305,7 @@ def create_app(token: str, data_dir: Path, fixture: Path,
         if value.note is not None:raise HTTPException(422,'INVALID_NOTE_EDIT')
         if value.ko is not None: block.ko=inline(value.ko)
         if value.caption_ko is not None: block.caption_ko=inline(value.caption_ko)
+        if translation_complete(block,sources.get(block_id,{}).get('block')):block.translation_error=None
         store.save_blocks(doc_id,[block])
         pipeline.refresh_completion(doc_id)
         return block
@@ -361,16 +448,20 @@ def create_app(token: str, data_dir: Path, fixture: Path,
     async def pdf_page(doc_id: str,page_number: int):
         with store.connect() as db:
             row=db.execute('SELECT source_path,page_count FROM documents WHERE id=?',(doc_id,)).fetchone()
-        if not row or not row['source_path'] or not 1<=page_number<=row['page_count']:raise HTTPException(404,'PAGE_NOT_FOUND')
+        if not row or not row['source_path'] or not 1<=page_number<=1000:raise HTTPException(404,'PAGE_NOT_FOUND')
         path=store.asset_path(doc_id,row['source_path'])
-        if path is None or path.suffix!='.pdf':raise HTTPException(404,'PAGE_NOT_FOUND')
+        if path is None or path.suffix.lower()!='.pdf':raise HTTPException(404,'PAGE_NOT_FOUND')
         def render():
             import pymupdf as fitz
             from .pdf_parser import PDF_LOCK
             with PDF_LOCK,fitz.open(path) as pdf:
-                page=pdf[page_number-1];scale=min(2,1800/max(page.rect.width,page.rect.height))
-                return page.get_pixmap(matrix=fitz.Matrix(scale,scale),alpha=False).tobytes('png')
-        return {'data_url':'data:image/png;base64,'+base64.b64encode(await asyncio.to_thread(render)).decode('ascii')}
+                if not pdf.is_pdf or pdf.needs_pass or page_number>len(pdf):raise ValueError('PAGE_NOT_FOUND')
+                page=pdf[page_number-1];scale=min(4,3600/max(page.rect.width,page.rect.height))
+                data=page.get_pixmap(matrix=fitz.Matrix(scale,scale),alpha=False).tobytes('png')
+                return data,{'width':page.rect.width,'height':page.rect.height},len(pdf)
+        try:data,size,count=await asyncio.to_thread(render)
+        except Exception:raise HTTPException(404,'PAGE_NOT_FOUND') from None
+        return {'data_url':'data:image/png;base64,'+base64.b64encode(data).decode('ascii'),'page_size':size,'page_count':count}
 
     @app.get("/documents/{doc_id}")
     def document(doc_id: str):

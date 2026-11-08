@@ -19,14 +19,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 
-from paperduet.adapter import plain
+from paperduet.adapter import MATH, plain
+from bs4 import BeautifulSoup
 from paperduet.app import create_app
 from paperduet.exports import table_html
 from paperduet.models import PipelineOptions
+from paperduet.validation import NUMBER_TOKEN
 
 def number_tokens(text):
     # Test transport: synthesize numeric content when generating fixture output.
-    return Counter(re.findall(r"(?<![\w.])[+−-]?\d+(?:[.,]\d+)*%?",plain(text)))
+    return Counter(NUMBER_TOKEN.findall(plain(text)))
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -86,10 +88,13 @@ class AuditProvider:
             def ko(en):
                 # Keep numbers and glossary renderings so validation passes first time.
                 terms = [g['ko'] for g in payload['glossary'] if re.search(r'(?<!\w)' + re.escape(g['term']) + r'(?!\w)', plain(en), re.I)]
-                return korean(int(len(en) * KO_RATIO)) + ' ' + ' '.join(list(number_tokens(en).elements()) + terms)
+                # A valid double follows the same scientific-notation rules as
+                # real translations, including inline formulas and scripts.
+                notation = MATH.findall(en) + [str(tag) for tag in BeautifulSoup(en,'html.parser').find_all(['sub','sup'])]
+                return korean(int(len(en) * KO_RATIO)) + ' ' + ' '.join(list(number_tokens(en).elements()) + terms + notation)
             return {'blocks': [{'id': b['id'], 'ko': ko(b.get('en') or ''),
                                 **({'caption_ko': ko(b['caption_en'])} if b.get('caption_en') else {}),
-                                'headers': [{'row': h['row'], 'col': h['col'], 'text_ko': korean(len(h['text_en']))} for h in b.get('headers', [])]}
+                                'headers': [{'row': h['row'], 'col': h['col'], 'text_ko': ko(h['text_en'])} for h in b.get('headers', [])]}
                                for b in payload['blocks']]}
         if stage == 'annotate':
             targets = [b for b in payload['target_blocks'] if b.get('en') or b.get('caption_en')]

@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .provider import AnthropicProvider, ProviderError, WindowsVault
+from .provider import AnthropicProvider, ProviderError, SystemVault
 
 
 class Redactor:
@@ -427,7 +427,7 @@ class APIProvider(StructuredAdapter):
 class ProviderRegistry:
     def __init__(self,store,vault=None):
         self.store=store
-        self.vaults={p: vault if p=='anthropic' and vault else WindowsVault(provider=p) for p in APIProvider.BASES}
+        self.vaults={p: vault if p=='anthropic' and vault else SystemVault(provider=p) for p in APIProvider.BASES}
 
     def adapter(self,provider='anthropic',mode='api_key'):
         if provider not in self.vaults or mode not in {'api_key','cli'}: raise ProviderError('AI_REQUEST_FAILED')
