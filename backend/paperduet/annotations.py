@@ -43,7 +43,7 @@ def section_batches(blocks,sources):
     fixed per-call cost (instructions, glossary, CLI overhead) small."""
     batches=[];batch=[];length=0
     for b in blocks:
-        if b.note or sources.get(b.id,{}).get('references',True):continue
+        if b.note or b.superseded_by or sources.get(b.id,{}).get('references',True):continue
         size=len(source_text(b))
         if batch and (b.section_path[:1]!=batch[-1].section_path[:1] or length+size>20000 or len(batch)>=60):
             batches.append(batch);batch=[];length=0

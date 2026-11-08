@@ -42,7 +42,8 @@ def test_actual_process_restart_resumes_page_checkpoint(tmp_path):
             if 1<=count<60:break
             time.sleep(.01)
         assert 1<=count<60,'Did not interrupt an active extraction'
-        cache=data/'documents'/doc_id/'pages-v2'/'0000.json'
+        from paperduet.pipeline import PAGE_CACHE
+        cache=data/'documents'/doc_id/PAGE_CACHE/'0000.json'
         cached=cache.read_bytes();modified=cache.stat().st_mtime_ns
         child.kill();child.wait(timeout=10);client.close()
         child,client=launch(data)

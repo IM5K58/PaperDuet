@@ -12,8 +12,8 @@ export function Crop({block,onAskImage}:{block:Block;onAskImage?:(block:Block)=>
   const [url,setUrl]=useState('');const [error,setError]=useState(false);const ref=useRef<HTMLDivElement>(null);
   const [expanded,setExpanded]=useState(false);
   const menu=useImageMenu(onAskImage?()=>onAskImage(block):undefined);
-  useEffect(()=>{let stopped=false;const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();void request<{data_url:string}>(`/documents/${block.doc_id}/blocks/${block.id}/image`).then(data=>{if(!stopped)setUrl(data.data_url);}).catch(()=>{if(!stopped)setError(true);});}},{rootMargin:'400px'});if(ref.current)observer.observe(ref.current);return()=>{stopped=true;observer.disconnect();};},[block.doc_id,block.id]);
-  return <div ref={ref} className="pdf-crop">{url?<><button className="crop-open" onClick={()=>setExpanded(true)} onContextMenu={menu.onContextMenu} onKeyDown={menu.onKeyDown} aria-label={`${block.n??'PDF'} 원본 확대`}><img src={url} alt={`${block.n??'PDF'} 원본 영역`}/><span><Icon name="expand"/>확대 보기</span></button>{menu.element}{expanded&&<ImageViewer url={url} label={block.n??'PDF'} onClose={()=>setExpanded(false)} onAskImage={onAskImage?()=>onAskImage(block):undefined}/>}</>:<p>{error?'원본 이미지를 불러오지 못했습니다.':'원본 이미지'}</p>}</div>;
+  useEffect(()=>{let stopped=false;const controller=new AbortController();setUrl('');setError(false);setExpanded(false);const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();void request<{data_url:string}>(`/documents/${block.doc_id}/blocks/${block.id}/image`,{signal:controller.signal}).then(data=>{if(!stopped)setUrl(data.data_url);}).catch(()=>{if(!stopped)setError(true);});}},{rootMargin:'400px'});if(ref.current)observer.observe(ref.current);return()=>{stopped=true;controller.abort();observer.disconnect();};},[block.doc_id,block.id,block.image_path]);
+  return <div ref={ref} className="pdf-crop">{url?<><button className="crop-open" onClick={()=>setExpanded(true)} onContextMenu={menu.onContextMenu} onKeyDown={menu.onKeyDown} aria-label={`${block.n??'PDF'} 원본 확대`}><img src={url} alt={`${block.n??'PDF'} 원본 영역`} onError={()=>{setUrl('');setError(true);setExpanded(false);}}/><span><Icon name="expand"/>확대 보기</span></button>{menu.element}{expanded&&<ImageViewer url={url} label={block.n??'PDF'} onClose={()=>setExpanded(false)} onAskImage={onAskImage?()=>onAskImage(block):undefined}/>}</>:<p>{error?'원본 이미지를 불러오지 못했습니다.':'원본 이미지'}</p>}</div>;
 }
 
 function ImageViewer({url,label,onClose,onAskImage}:{url:string;label:string;onClose:()=>void;onAskImage?:()=>void}) {
@@ -31,8 +31,38 @@ function ImageViewer({url,label,onClose,onAskImage}:{url:string;label:string;onC
 }
 
 export const NOTE_NAMES: Record<NoteKind, string> = { key: '핵심', res: '결과', lim: '한계', ins: '해석', mth: '수식', trm: '용어' };
+const INLINE_MATH = /(?<!\\)\\\([\s\S]*?(?<!\\)\\\)|(?<!\\)\\\[[\s\S]*?(?<!\\)\\\]|(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<![\\$])\$(?![\s$])(?:\\.|[^\\$\n])+?(?<![\s\\])\$(?![$\d])/g;
+function inlineHtml(text: string) {
+  // Math is text, even when it contains comparisons or HTML-looking symbols.
+  // Preserve existing entities: decoding happens once below, after sanitizing.
+  const protectedCode = text.replace(/(<code\b[^>]*>)([\s\S]*?)(<\/code\s*>)/gi,
+    (_match, open: string, code: string, close: string) => open + code.replace(/</g, '&lt;').replace(/>/g, '&gt;') + close);
+  const protectedMath = protectedCode.replace(INLINE_MATH,
+    match => match.startsWith('$') && !match.startsWith('$$') && /<\/?code\b/i.test(match)
+      ? match : match.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+  const protectedAngles = protectedMath.replace(/<(?=[^<>]*(?:<|$))/g, '&lt;');
+  const sanitized = DOMPurify.sanitize(protectedAngles, { ALLOWED_TAGS: ['b', 'i', 'strong', 'em', 'sub', 'sup', 'code', 'br'], ALLOWED_ATTR: [] });
+  const container = document.createElement('div'); container.innerHTML = sanitized;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT), nodes: Text[] = [];
+  while (walker.nextNode()) if (!walker.currentNode.parentElement?.closest('code')) nodes.push(walker.currentNode as Text);
+  for (const node of nodes) {
+    const fragment = document.createDocumentFragment(); let offset = 0;
+    for (const match of node.data.matchAll(INLINE_MATH)) {
+      fragment.append(node.data.slice(offset, match.index));
+      const source = match[0], dollars = source.startsWith('$') && !source.startsWith('$$');
+      const value = source.slice(dollars ? 1 : 2, dollars ? -1 : -2);
+      const display = source.startsWith('\\[') || source.startsWith('$$');
+      const el = document.createElement('span'); el.setAttribute('data-source-text', source);
+      if (display) { el.style.display = 'block'; el.style.overflowX = 'auto'; }
+      el.innerHTML = katex.renderToString(value, { displayMode: display, throwOnError: false, trust: false, strict: 'ignore', maxExpand: 1000, maxSize: 20 });
+      fragment.append(el); offset = match.index + source.length;
+    }
+    if (offset) { fragment.append(node.data.slice(offset)); node.replaceWith(fragment); }
+  }
+  return container.innerHTML;
+}
 export function Inline({ text = '', className = '', field }: { text?: string; className?: string;field?:string }) {
-  const html = useMemo(() => DOMPurify.sanitize(text, { ALLOWED_TAGS: ['b', 'i', 'sub', 'sup', 'code'], ALLOWED_ATTR: [] }).replace(/\\\(([\s\S]+?)\\\)/g,(_match,latex:string)=>{const el=document.createElement('span');el.innerHTML=latex;const value=el.textContent||'';el.setAttribute('data-source-text',`\\(${value}\\)`);el.innerHTML=katex.renderToString(value,{displayMode:false,throwOnError:false,trust:false,strict:'ignore',maxExpand:1000,maxSize:20});return el.outerHTML;}), [text]);
+  const html = useMemo(() => inlineHtml(text), [text]);
   return <span className={className} data-ask-field={field} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -46,10 +76,10 @@ function Equation({ latex }: { latex: string }) {
     {html?<div className="equation-scroll" tabIndex={0} role="region" aria-label="수식" dangerouslySetInnerHTML={{ __html: html }} />:<div className="equation-error" role="status">수식을 표시할 수 없어 LaTeX 원문을 보여 줍니다.<pre>{latex}</pre></div>}{copyError&&<p role="status">복사하지 못했습니다. 아래 LaTeX 원문을 선택해 복사하세요.</p>}<details className="latex-source"><summary>LaTeX 원문</summary><pre>{latex}</pre></details></>;
 }
 
-function NoteCard({ block: b, evidence, anchor }: { block: Block; evidence?: Map<string,string>; anchor: React.ReactNode }) {
+function NoteCard({ block: b, evidence, anchor, historical=false }: { block: Block; evidence?: Map<string,string>; anchor: React.ReactNode; historical?:boolean }) {
   const [collapsed, setCollapsed] = useState(false);
   const note = b.note!;
-  return <aside id={b.id} data-block data-note-kind={note.kind} className={`note n-${note.kind}${collapsed ? ' collapsed' : ''}`}>
+  return <aside {...(historical?{}:{id:b.id,'data-block':true})} data-note-kind={note.kind} className={`note n-${note.kind}${collapsed ? ' collapsed' : ''}`}>
     <div className="note-heading"><span className="note-kind">{NOTE_NAMES[note.kind]}</span><strong>{note.title}</strong>
       <span className="claim">{{ stated: '논문 명시', interpretation: '해석', mixed: '혼합' }[note.claim]}</span>{note.origin==='ai_answer'&&<span className="ai-answer-badge">AI 답변</span>}
       <button className="note-collapse" aria-expanded={!collapsed} aria-label={`${note.title} ${collapsed ? '펼치기' : '접기'}`} onClick={() => setCollapsed(c => !c)}>{collapsed ? '펼치기' : '접기'}</button>{anchor}</div>
@@ -58,17 +88,30 @@ function NoteCard({ block: b, evidence, anchor }: { block: Block; evidence?: Map
   </aside>;
 }
 
-export const ReaderBlock = memo(function ReaderBlock({ block: b, evidence, onAskImage }: { block: Block; evidence?:Map<string,string>; onAskImage?:(block:Block)=>void }) {
-  const anchor = <a className="block-anchor" href={`#${b.id}`} aria-label={`${b.id} 고유 링크`}>#</a>;
+export const ReaderBlock = memo(function ReaderBlock({ block: b, evidence, onAskImage, historical=false }: { block: Block; evidence?:Map<string,string>; onAskImage?:(block:Block)=>void; historical?:boolean }) {
+  if(b.superseded_by&&!historical)return <section id={b.id} data-block className="previous-source"><div className="previous-source-heading"><span>이전 원문이 보존되어 있습니다.</span><a href={`#${b.superseded_by}`}>새 원문으로 이동</a></div><details className="previous-source-details"><summary>이전 원문 · 기존 번역{b.n&&` · ${b.n}`}</summary><div className="previous-source-content"><ReaderBlock block={b} evidence={evidence} onAskImage={onAskImage} historical/></div></details></section>;
+  const attrs=historical?{}:{id:b.id,'data-block':true};
+  const anchor = historical?null:<a className="block-anchor" href={`#${b.id}`} aria-label={`${b.id} 고유 링크`}>#</a>;
   if (b.type === 'sec' || b.type === 'sub' || b.type === 'ssub') {
     const Heading = b.type === 'sec' ? 'h2' : b.type === 'sub' ? 'h3' : 'h4';
-    return <Heading id={b.id} data-block className={`heading ${b.type}`}>
+    return <Heading {...attrs} className={`heading ${b.type}`}>
       {b.n&&/^\d/.test(b.n)&&<span className="section-number">{b.n}</span>}
       <Inline text={b.en} field="en" className="heading-en" />
       <span className="heading-ko">{!b.ko&&<small className="translation-pending">미번역</small>}<Inline text={b.ko||b.en} field={b.ko?'ko':'en'}/></span>{anchor}
     </Heading>;
   }
-  if (b.note) return <NoteCard block={b} evidence={evidence} anchor={anchor}/>;
+  if (b.note) return <NoteCard block={b} evidence={evidence} anchor={anchor} historical={historical}/>;
+  if (b.restore_error && (b.type === 'tab' || b.type === 'eq')) {
+    const table = b.type === 'tab';
+    const sourceText = b.en?.trim() ? b.en : undefined;
+    const extracted = sourceText || b.latex || (b.table ? [...b.table.header, ...b.table.body].map(row => row.map(cell => cell.text_en).join('\t')).join('\n') : '');
+    return <figure {...attrs} className={table ? 'table-block' : 'card equation-card'}>
+      <figcaption><b>{table ? b.n : `식 ${b.n || ''}`}</b><Inline text={b.caption_ko || b.caption_en}/>{anchor}</figcaption>
+      {b.image_path && <Crop block={b}/>}
+      <p className="translation-pending">{table ? '표' : '수식'} 복원 결과를 확인하지 못해 {b.image_path ? '원본 이미지를 표시합니다.' : '추출한 원문을 표시합니다.'}</p>
+      {extracted && <details className="latex-source"><summary>추출한 {table ? '표 내용' : '수식'} 보기</summary><pre className="plain-table">{!sourceText && b.latex ? extracted : <Inline text={extracted}/>}</pre></details>}
+    </figure>;
+  }
   if (b.table) {
     const renderCells = (cells: Cell[], ri: number, header: boolean) => cells.map((cell, ci) => {
       const Tag = cell.is_header ? 'th' : 'td';
@@ -82,20 +125,21 @@ export const ReaderBlock = memo(function ReaderBlock({ block: b, evidence, onAsk
           <tbody>{b.table.body.map((r, i) => <tr key={i} className={b.table!.highlight_rows.includes(i) ? 'highlight' : r.every(c => c.is_header) ? 'group-row' : ''}>{renderCells(r, i, false)}</tr>)}</tbody>
         </table>
       </div>;
-    return <figure id={b.id} data-block className="table-block">
+    return <figure {...attrs} className="table-block">
       <figcaption><b>{b.n}</b><span className={b.caption_en&&b.caption_ko&&b.caption_en!==b.caption_ko?'caption-en':''}><Inline text={b.caption_en||b.caption_ko}/></span>{b.caption_en&&b.caption_ko&&b.caption_en!==b.caption_ko&&<span className="caption-ko"><Inline text={b.caption_ko}/></span>}{anchor}</figcaption>
       {grid}
       {!!(b.table.highlight_rows.length||b.table.best_cells.length)&&<p className="table-legend">{b.table.highlight_rows.length>0&&<span><i/> 제안 모델</span>}{b.table.best_cells.length>0&&<span><strong>굵은 수치</strong> 열별 최댓값 (동률 포함)</span>}</p>}
       {b.image_path&&<details className="table-original"><summary>원본 표 이미지 확인</summary><Crop block={b}/></details>}
     </figure>;
   }
-  if (b.type === 'fig') return <figure id={b.id} data-block className="figure-block">
+  if (b.type === 'fig') return <figure {...attrs} className="figure-block">
     {b.image_path&&<Crop block={b} onAskImage={onAskImage}/>}<figcaption><b>{b.n}</b>{anchor}<div className="en"><Inline text={b.caption_en} field="caption_en" /></div><div className="ko"><Inline text={b.caption_ko||b.caption_en} field={b.caption_ko?'caption_ko':'caption_en'} /></div></figcaption>
   </figure>;
-  if (b.type === 'eq') return <section id={b.id} data-block className="card equation-card"><header>식 {b.n}{anchor}</header>{b.latex?<><Equation latex={b.latex}/>{b.image_path&&<details className="equation-original"><summary>원본 수식 이미지 확인</summary><Crop block={b}/></details>}</>:<>{b.image_path&&<Crop block={b}/>}<p className="translation-pending">AI 연결 후 수식을 복원합니다.</p></>}</section>;
-  if(b.type==='tab')return <figure id={b.id} data-block className="table-block"><figcaption><b>{b.n}</b> <Inline text={b.caption_ko||b.caption_en}/>{anchor}</figcaption>{b.image_path&&<Crop block={b}/>}<pre className="plain-table"><Inline text={b.en}/></pre><p className="translation-pending">표 구조 복원 대기 · 추출한 원문을 표시합니다.</p></figure>;
-  if (b.card) return <section id={b.id} data-block className="card"><header><Inline text={b.ko} />{anchor}</header><pre>{b.card.body}</pre><div className="card-explanation"><Inline text={b.card.explain_ko} /></div></section>;
-  return <div id={b.id} data-block className={`parallel ${b.type}`}>
+  if (b.type === 'eq') return <section {...attrs} className="card equation-card"><header>식 {b.n}{anchor}</header>{b.latex?<><Equation latex={b.latex}/>{b.image_path&&<details className="equation-original"><summary>원본 수식 이미지 확인</summary><Crop block={b}/></details>}</>:<>{b.image_path&&<Crop block={b}/>}<p className="translation-pending">AI 연결 후 수식을 복원합니다.</p></>}</section>;
+  if(b.type==='tab')return <figure {...attrs} className="table-block"><figcaption><b>{b.n}</b> <Inline text={b.caption_ko||b.caption_en}/>{anchor}</figcaption>{b.image_path&&<Crop block={b}/>}<pre className="plain-table"><Inline text={b.en}/></pre><p className="translation-pending">표 구조 복원 대기 · 추출한 원문을 표시합니다.</p></figure>;
+  if (b.card) return <section {...attrs} className="card"><header><Inline text={b.ko} />{anchor}</header><pre>{b.card.body}</pre><div className="card-explanation"><Inline text={b.card.explain_ko} /></div></section>;
+  return <div {...attrs} className={`parallel ${b.type}${b.ocr?' ocr-paragraph':''}`}>
+    {b.ocr&&<small className="ocr-source-label" title="원본 이미지에서 읽은 글자입니다. 숫자·기호·수식과 읽기 순서를 원문과 대조하세요.">OCR로 읽은 원문</small>}
     {anchor}<div className="en" lang="en"><Inline text={b.en} field="en" /></div><div className="ko" lang={b.ko?'ko':'en'}>{!b.ko&&<small className="translation-pending">{b.section_path.some(p=>/^(references|bibliography)$/i.test(p))?'참고문헌 · 원문 유지':'미번역 · 원문'}<br/></small>}<Inline text={b.ko||b.en} field={b.ko?'ko':'en'} /></div>
   </div>;
 });

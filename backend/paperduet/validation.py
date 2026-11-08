@@ -1,9 +1,68 @@
 import re
+import html
+from collections import Counter
+from bs4 import BeautifulSoup
 
-from .adapter import plain
+from .adapter import MATH, inline, plain
 from .models import Block, Table
 
 NUMERIC_CELL = re.compile(r"[+−-]?\d+(?:[.,]\d+)*%?")
+NUMBER_TOKEN = re.compile(r"(?<![A-Za-z0-9_.])[+−-]?\d+(?:[.,]\d+)*(?:[eE][+−-]?\d+)?%?")
+
+
+def translation_preserves_content(source: str, translated: str) -> bool:
+    """Check exact source numbers and inline math before accepting AI output.
+
+    This is an integrity check, not a prose-quality score. Existing/manual
+    translations still use the presence-only completion rule below.
+    """
+    def tokens(text):
+        value=plain(inline(text)).replace('−','-')
+        value=re.sub(r'(?<=\d)\s*(?:퍼센트|percent\b)', '%', value, flags=re.I)
+        value=re.sub(r'(?<=\d)\s+(?=%)', '', value)
+        return NUMBER_TOKEN.findall(value)
+    numbers = lambda text: Counter(n.rstrip('%') for n in tokens(text))
+    percentages = lambda text: Counter(n.rstrip('%') for n in tokens(text) if n.endswith('%'))
+    formulas = lambda text: Counter(re.sub(r'\s+', '', html.unescape(m[2:-2] if m.startswith(('\\(', '\\[', '$$')) else m[1:-1]))
+        for m in MATH.findall(text))
+    scripts = lambda text: Counter((tag.name, tag.get_text())
+        for tag in BeautifulSoup(inline(text),'html.parser').find_all(['sub','sup']))
+    return not (numbers(source) - numbers(translated) or formulas(source) - formulas(translated)
+                or scripts(source) - scripts(translated) or percentages(source) - percentages(translated))
+
+
+def table_numeric_conflict(source: Table | None, recovered: Table) -> bool:
+    """Use positions only when the extracted and recovered grids align.
+
+    Broken/merged extractions cannot be an oracle for a repaired grid. For
+    matching dimensions and row labels, however, moving/changing a numeric
+    value must not silently replace the original.
+    """
+    if source is None:
+        return False
+    try:
+        before, width = table_grid(source)
+        after, recovered_width = table_grid(recovered)
+    except ValueError:
+        return False
+    if width != recovered_width or len(source.body) != len(recovered.body) or len(source.header) != len(recovered.header):
+        return False
+    # Scores may be tuples, scientific notation or mean ± deviation rather
+    # than a single numeric cell. Keep all their numeric tokens at that cell.
+    old = {(r-len(source.header),c): tuple(n.replace('−','-') for n in NUMBER_TOKEN.findall(plain(value)))
+           for (r,c),value in before.items() if r>=len(source.header) and NUMBER_TOKEN.search(plain(value))}
+    if not old:
+        return False
+    # First-column labels anchor the rows; changed labels indicate a repaired
+    # structure whose old coordinates cannot be compared reliably.
+    for row in range(len(source.body)):
+        a = plain(before.get((row + len(source.header), 0), '')).strip()
+        b = plain(after.get((row + len(recovered.header), 0), '')).strip()
+        if not NUMERIC_CELL.fullmatch(a) and a != b:
+            return False
+    new = {(r-len(recovered.header),c): tuple(n.replace('−','-') for n in NUMBER_TOKEN.findall(plain(value)))
+           for (r,c),value in after.items() if r>=len(recovered.header)}
+    return any(new.get(location,())!=value for location,value in old.items())
 
 
 def table_grid(table: Table):
@@ -39,8 +98,11 @@ def numeric_locations(table: Table):
 
 
 def translation_complete(block: Block, source: Block | None = None) -> bool:
-    """Completion means text exists. Length, numbers and terminology do not
-    classify a translation or cause another paid request."""
+    """Saved/manual translations are complete when their text exists.
+
+    New AI answers undergo a separate integrity check before they are saved;
+    reading or editing an existing document never triggers paid requests.
+    """
     source = source or block
     present = lambda value: bool(plain(value or '').strip())
     if block.type in {'sec','sub','ssub','p','li'} and present(source.en) and not present(block.ko):

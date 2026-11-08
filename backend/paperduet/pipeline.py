@@ -16,7 +16,7 @@ from .adapter import inline, parse_table, plain
 from .models import Model, PipelineOptions
 from .pdf_parser import PyMuPDFParser
 from .provider import ProviderError
-from .validation import table_grid, translation_complete
+from .validation import table_grid, table_numeric_conflict, translation_complete, translation_preserves_content
 from .annotations import AnnotationBatch, first_occurrences, glossary_candidates, make_notes, section_batches, section_window
 from .table_style import decorate_tables
 
@@ -95,7 +95,8 @@ def atomic_json(path: Path, data):
 BUSY = {'queued', 'running', 'batch_waiting'}
 # Answers a work unit handles itself; every other provider error pauses the job.
 SOFT = {'AI_INVALID_JSON', 'AI_OUTPUT_LIMIT'}
-PARSER_REVISION = 3  # 2: pages-v2 extraction; 3: paragraphs rejoined across breaks
+PARSER_REVISION = 4  # 4: figure regions, orphan images and script positioning
+PAGE_CACHE = 'pages-v4'
 COMPLETION_REFRESHED = 'completion_refreshed_1'  # app_settings key: legacy completion re-derived once
 MISSING = object()
 
@@ -171,11 +172,11 @@ class Pipeline:
         with self.store.connect() as db:
             # Upgrade untouched extraction previews only. Translations, notes and
             # conversations retain their stable IDs and are never overwritten.
-            # Revision 3 rejoins paragraphs cut by page/column breaks, figures and tables;
-            # the cached page extraction is reused. arXiv HTML imports are not PDF-parsed.
+            # New geometry needs a fresh page cache. Only untouched previews are
+            # replaced; approved translations and reading anchors stay intact.
             for row in db.execute("SELECT j.doc_id,j.checkpoint FROM jobs j JOIN documents d ON d.id=j.doc_id WHERE d.source_kind='pdf'").fetchall():
                 checkpoint=json.loads(row['checkpoint'] or '{}')
-                if checkpoint.get('parser_revision',1)>=PARSER_REVISION or checkpoint.get('ai_approved') or checkpoint.get('source_kind','pdf')!='pdf':continue
+                if checkpoint.get('parser_revision',1)>=PARSER_REVISION or checkpoint.get('ai_approved') or checkpoint.get('reanalysis_id') or checkpoint.get('source_kind','pdf')!='pdf':continue
                 payloads=[json.loads(r[0]) for r in db.execute('SELECT payload FROM blocks WHERE doc_id=?',(row['doc_id'],))]
                 edited=any(b.get('ko') or b.get('caption_ko') or b.get('note') for b in payloads)
                 if edited or db.execute('SELECT 1 FROM threads WHERE doc_id=?',(row['doc_id'],)).fetchone() or db.execute('SELECT 1 FROM presentation_notes WHERE doc_id=?',(row['doc_id'],)).fetchone():continue
@@ -243,13 +244,17 @@ class Pipeline:
             temp.unlink(missing_ok=True)
 
     def estimate(self,doc_id):
-        doc=self.store.document(doc_id)
+        doc=self.processing_document(doc_id)
         if doc is None:
             return None
         chars=sum(len(b.en or '')+len(b.caption_en or '') for b in doc.blocks)
         images=sum(b.type in {'tab','eq'} for b in doc.blocks)
         return {'approximate':True,'input_tokens':int(chars/3*3+images*1600), 'output_tokens':int(chars/3*1.4),
                 'restore_regions':images,'source_characters':chars,'options':self.store.pipeline_options().model_dump()}
+
+    def processing_document(self,doc_id):
+        doc=self.store.document(doc_id)
+        return doc.model_copy(update={'blocks':[b for b in doc.blocks if not b.superseded_by]}) if doc else None
 
     def approve(self,doc_id,options):
         job=self.store.job(doc_id)
@@ -454,7 +459,8 @@ class Pipeline:
             pages=[]
             for i in range(metadata['page_count']):
                 if self.paused(doc_id): return
-                cache=directory/('pages-v2' if checkpoint.get('parser_revision',1)>=2 else 'pages')/f'{i:04d}.json'
+                revision=checkpoint.get('parser_revision',1)
+                cache=directory/(PAGE_CACHE if revision>=4 else 'pages-v2' if revision>=2 else 'pages')/f'{i:04d}.json'
                 self.store.update_job(doc_id,'Extract','running',i/metadata['page_count']*.25,error=None)
                 if cache.exists():
                     result=json.loads(cache.read_text(encoding='utf-8'))
@@ -485,7 +491,7 @@ class Pipeline:
         if options.batch and not getattr(adapter,'supports_batch',False):
             raise ProviderError('BATCH_UNSUPPORTED')
         await self.settle_batch(doc_id)
-        doc=self.store.document(doc_id)
+        doc=self.processing_document(doc_id)
         sources=self.store.sources(doc_id)
         # Round 1: table/equation images and the glossary do not depend on each other.
         restored=set(checkpoint.get('restored',[]))
@@ -501,7 +507,7 @@ class Pipeline:
         if 'Glossary' not in done:units.append(tracked(self.glossary_unit(doc_id,doc,sources,options),glossary_ready))
         if units:self.store.update_job(doc_id,'Restore' if len(restored)<len(candidates) else 'Glossary','running',.3+.15*len(restored)/max(1,len(candidates)))
         if not await self.drive(doc_id,units,options) or self.paused(doc_id):return
-        doc=self.store.document(doc_id)
+        doc=self.processing_document(doc_id)
         targets=[b for b in doc.blocks if b.id in sources and not sources[b.id]['references'] and (b.type in {'sec','sub','ssub','p','li'} or b.caption_en or b.table)]
         translated={b.id for b in targets if translation_complete(b,sources[b.id]['block'])}
         batches=[];batch=[];length=0
@@ -520,8 +526,10 @@ class Pipeline:
         units=[tracked(self.translate_unit(doc_id,batch,doc.glossary,sources,options,'translate:'+batch[0].id),partial(batch_translated,batch)) for batch in batches]
         if not await self.drive(doc_id,units,options) or self.paused(doc_id):return
         done=list(dict.fromkeys(done+['Translate']))
-        doc=self.store.document(doc_id)
-        groups=section_batches(doc.blocks,sources)
+        doc=self.processing_document(doc_id)
+        # Reanalysis preserves every existing annotation, including generated
+        # notes. Translating recovered source must not replace those notes.
+        groups=[] if checkpoint.get('preserve_annotations') else section_batches(doc.blocks,sources)
         cached=self.store.annotated_sections(doc_id)
         finished=lambda:sum(key in cached for key,_ in groups)
         def section_annotated(key):
@@ -531,7 +539,7 @@ class Pipeline:
         units=[tracked(self.annotate_unit(doc_id,key,batch,options),partial(section_annotated,key)) for key,batch in groups if key not in cached]
         if not await self.drive(doc_id,units,options) or self.paused(doc_id):return
         done=list(dict.fromkeys(done+['Annotate']))
-        doc=self.store.document(doc_id)
+        doc=self.processing_document(doc_id)
         decorate_tables(doc.blocks)
         self.store.save_blocks(doc_id,doc.blocks)
         done=list(dict.fromkeys([stage for stage in done if stage!='Validate']+['Translate','Render']))
@@ -615,6 +623,7 @@ class Pipeline:
         return block
 
     def restore_unit(self,doc_id,block,source,options):
+        failure='invalid'
         for attempt in range(2):
             request=AIRequest(f'restore:{block.id}:{attempt}','table' if block.type=='tab' else 'equation',options.restore_model,
                 {'source_text':source.en or '', 'caption':source.caption_en or ''},self.store.data_dir/block.image_path)
@@ -623,15 +632,20 @@ class Pipeline:
                 if isinstance(value,ProviderError):raise ValueError(str(value))
                 if block.type=='tab':
                     recovered=parse_table(value['html']);table_grid(recovered)
+                    if table_numeric_conflict(source.table,recovered):
+                        failure='numeric_mismatch'
+                        raise ValueError('Table numbers changed')
                     block.table=recovered
                 else:
                     latex=value.get('latex')
                     if not isinstance(latex,str) or not 0<len(latex)<20000:
                         raise ValueError('Invalid equation')
                     block.latex=latex
+                block.restore_error=None
                 return
             except (ValueError,KeyError,TypeError):
                 self.store.discard_ai_result(doc_id,request.key)
+        block.restore_error=failure
         # Neither answer gave a usable table or equation. Keep the extracted block (the
         # reader shows its page image) and let the rest of the paper go on: stopping here
         # would stop the same paper on every resume.
@@ -669,7 +683,8 @@ class Pipeline:
     def translate_unit(self,doc_id,blocks,glossary,sources,options,tag):
         pending=blocks
         for attempt in range(2):
-            value=yield AIRequest(f'{tag}:{attempt}','translate',options.translate_model,self.translation_payload(pending,glossary))
+            request=AIRequest(f'{tag}:{attempt}','translate',options.translate_model,self.translation_payload(pending,glossary))
+            value=yield request
             if isinstance(value,ProviderError):
                 # A batch whose Korean overflows the output cap (or keeps coming
                 # back malformed) would fail identically on every resume. Halve it.
@@ -684,14 +699,35 @@ class Pipeline:
                 for v in data.blocks:values.setdefault(v.id,v)
                 for b in pending:
                     answer=values.get(b.id)
-                    if answer is None:continue  # Stays pending; retried below.
-                    if answer.ko is not None: b.ko=inline(answer.ko)
-                    if answer.caption_ko is not None: b.caption_ko=inline(answer.caption_ko)
+                    if answer is None:
+                        b.translation_error=b.translation_error or 'invalid_response'
+                        self.store.discard_ai_result(doc_id,request.key)
+                        continue  # Stays pending; retried below.
+                    candidate=b.model_copy(deep=True)
+                    rejected=False
+                    if answer.ko is not None:
+                        candidate.ko=inline(answer.ko)
+                        rejected=not translation_preserves_content(b.en or '',candidate.ko)
+                        if b.type in {'sec','sub','ssub','p','li'} and plain(b.en or '').strip() and not plain(candidate.ko).strip():rejected=True
+                    if answer.caption_ko is not None:
+                        candidate.caption_ko=inline(answer.caption_ko)
+                        rejected=rejected or not translation_preserves_content(b.caption_en or '',candidate.caption_ko)
+                        if plain(b.caption_en or '').strip() and not plain(candidate.caption_ko).strip():rejected=True
                     for h in answer.headers:
-                        if b.table and h.row<len(b.table.header) and h.col<len(b.table.header[h.row]) and not b.table.header[h.row][h.col].numeric:
-                            b.table.header[h.row][h.col].text_ko=inline(h.text_ko)
+                        if candidate.table and h.row<len(candidate.table.header) and h.col<len(candidate.table.header[h.row]) and not candidate.table.header[h.row][h.col].numeric:
+                            cell=candidate.table.header[h.row][h.col]
+                            cell.text_ko=inline(h.text_ko)
+                            rejected=rejected or not translation_preserves_content(cell.text_en,cell.text_ko)
+                            if plain(cell.text_en).strip() and not plain(cell.text_ko).strip():rejected=True
+                    if rejected:
+                        b.translation_error='source_mismatch'
+                        self.store.discard_ai_result(doc_id,request.key)
+                        continue
+                    b.ko,b.caption_ko,b.table=candidate.ko,candidate.caption_ko,candidate.table
+                    b.translation_error=None if translation_complete(candidate,sources[b.id]['block']) else b.translation_error or 'invalid_response'
             except ValueError:
-                pass
+                for b in pending:b.translation_error=b.translation_error or 'invalid_response'
+                self.store.discard_ai_result(doc_id,request.key)
             pending=[b for b in pending if not translation_complete(b,sources[b.id]['block'])]
             if not pending: break
 
@@ -731,7 +767,7 @@ class Pipeline:
             job['status']=='ready_to_translate' and 'Render' in job['checkpoint'].get('completed_stages',[])):
             return
         doc=self.store.document(doc_id);sources=self.store.sources(doc_id)
-        targets=[b for b in doc.blocks if b.id in sources and not sources[b.id]['references']
+        targets=[b for b in doc.blocks if not b.superseded_by and b.id in sources and not sources[b.id]['references']
                  and (b.type in {'sec','sub','ssub','p','li'} or b.caption_en or b.table)]
         translated=[b.id for b in targets if translation_complete(b,sources[b.id]['block'])]
         complete=len(translated)==len(targets)

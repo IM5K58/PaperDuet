@@ -5,10 +5,11 @@ import { Tutorial, lastTutorialScene } from './tutorial';
 import { AppSettings, ArxivInput, type UpdateInfo } from './m4';
 import { invoke } from '@tauri-apps/api/core';
 import { ERROR_TEXT, authorizedFetch, request } from './api';
-import type { Job, LibraryItem, PipelineOptions } from './types';
+import type { Document, Job, LibraryItem, PipelineOptions } from './types';
 import { DEFAULTS, Modal, ModelChoices, ProviderPanel, type ProviderSettings } from './connections';
 import { BrandMark, Icon } from './icons';
 import { resolveTheme } from './theme';
+import { OcrDialog } from './ocr';
 
 type SortKey='recent'|'added'|'title';
 const shelfColumns=()=>window.matchMedia('(max-width:600px)').matches?3:window.matchMedia('(max-width:950px)').matches?5:7;
@@ -223,6 +224,7 @@ function ProgressPanel({docId,onClose,onRead,onSettings}:{docId:string;onClose:(
   const [job,setJob]=useState<Job|null>(null);const [error,setError]=useState('');const [revision,setRevision]=useState(0);
   const [estimate,setEstimate]=useState<{input_tokens:number;output_tokens:number;restore_regions:number}|null>(null);
   const [options,setOptions]=useState(DEFAULTS);const [busy,setBusy]=useState(false);
+  const [ocrDoc,setOcrDoc]=useState<Document|null>(null);
   useEffect(()=>{void request<ProviderSettings>('/settings/providers').then(s=>setOptions(s.options)).catch(()=>{});},[]);
   useEffect(()=>{
     const controller=new AbortController();let retry:ReturnType<typeof setTimeout>;
@@ -238,13 +240,14 @@ function ProgressPanel({docId,onClose,onRead,onSettings}:{docId:string;onClose:(
   const saving=job?.checkpoint.options?.batch;const waiting=job?.status==='batch_waiting'?job.checkpoint.pending_batch:null;
   const cli=options.mode==='cli';
   const action=async(path:string,body?:PipelineOptions)=>{setBusy(true);setError('');try{await request(`/documents/${docId}/${path}`,{method:'POST',body:body?JSON.stringify(body):undefined});setRevision(v=>v+1);}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
-  return <Modal title="논문 처리" onClose={onClose}><div className="dialog-content"><p className="pipeline-state">{(active||!job)&&<span className="spinner" aria-hidden="true"/>}{job?LABELS[job.status]:'상태 확인 중…'}</p><progress aria-label="논문 처리 진행률" max={1} value={job?.progress??0}/><p>{job?`${STAGES[job.stage]??job.stage} · ${Math.round(job.progress*100)}%`:''}</p>
+  return <><Modal title="논문 처리" onClose={onClose}><div className="dialog-content"><p className="pipeline-state">{(active||!job)&&<span className="spinner" aria-hidden="true"/>}{job?LABELS[job.status]:'상태 확인 중…'}</p><progress aria-label="논문 처리 진행률" max={1} value={job?.progress??0}/><p>{job?`${STAGES[job.stage]??job.stage} · ${Math.round(job.progress*100)}%`:''}</p>
     <ol className="pipeline-stages">{Object.entries(STAGES).map(([stage,label])=><li key={stage} className={job?.stage===stage?'current':job?.checkpoint.completed_stages?.includes(stage)?'done':''}><span>{job?.checkpoint.completed_stages?.includes(stage)?'✓':'○'}</span>{label}</li>)}</ol>
     {job?.checkpoint.extracted_pages!==undefined&&<p>추출한 페이지 {job.checkpoint.extracted_pages}쪽{job.checkpoint.total_blocks?` · 번역 ${job.checkpoint.translated_count??0}/${job.checkpoint.total_blocks}블록`:''}</p>}
     {job?.checkpoint.annotation_total!==undefined&&<p>주석 완료 {job.checkpoint.annotation_count??0}/{job.checkpoint.annotation_total}개 섹션 묶음</p>}
     {waiting&&<div className="pipeline-notice"><b>절약 모드 · 제공자 서버에서 처리 중</b><p>{STAGES[job!.stage]??job!.stage} 요청 {waiting.count}건을 {submittedAgo(waiting.submitted_at)} 제출했습니다. 보통 1시간 이내, 늦으면 최대 24시간 걸립니다. 앱을 꺼도 제공자 서버에서 계속 처리되고, 다시 켜면 결과를 가져와 이어서 진행합니다.</p><button disabled={busy} onClick={()=>void action('realtime')}>남은 부분 바로 처리</button><small>제출한 요청을 취소하고 남은 부분을 기본 요금으로 바로 처리합니다. 이미 끝난 결과는 그대로 씁니다.</small></div>}
     {active&&saving&&!waiting&&<p className="transfer-note">절약 모드로 처리 중입니다. 다음 단계 요청을 제공자에게 보내고 있습니다.</p>}
     {job?.status==='awaiting_ai'&&<div className="pipeline-notice">텍스트 추출이 끝났습니다. 아직 완성된 대역 리더가 아닙니다. AI를 연결해 표·수식 복원, 번역과 주석을 만들어 주세요.<button onClick={onSettings}>AI 연결 설정</button></div>}
+    {job&&!active&&<div className="ocr-entry"><p>스캔된 페이지는 원본을 확인하고 글자를 읽을 수 있습니다.</p><button disabled={busy} onClick={()=>{setBusy(true);setError('');void request<Document>(`/documents/${docId}`).then(setOcrDoc).catch(failure=>setError(failure.message)).finally(()=>setBusy(false));}}>스캔 페이지 글자 읽기</button></div>}
     {estimate&&!active&&<><div className="token-estimate"><b>예상 사용량</b><p>입력 약 {estimate.input_tokens.toLocaleString()} · 출력 약 {estimate.output_tokens.toLocaleString()} 토큰</p><small>문자 수와 이미지 수를 바탕으로 한 추정치입니다. 재시도·표 복원에 따라 실제 사용량이 달라집니다.</small></div><ModelChoices options={options} setOptions={setOptions}/><fieldset className="run-mode"><legend>처리 방식</legend>
       <label><input type="radio" name="run-mode" checked={!options.batch||cli} onChange={()=>setOptions({...options,batch:false})}/><span><b>바로 처리</b><small>몇 분 안에 끝납니다 · 기본 요금</small></span></label>
       <label><input type="radio" name="run-mode" checked={!!options.batch&&!cli} disabled={cli} onChange={()=>setOptions({...options,batch:true})}/><span><b>절약 모드</b><small>토큰 요금 50% 할인 · 보통 1시간 이내, 최대 24시간</small></span></label>
@@ -252,5 +255,5 @@ function ProgressPanel({docId,onClose,onRead,onSettings}:{docId:string;onClose:(
     {job?.checkpoint.error&&<p role="alert" className="error-message">{ERROR_TEXT[job.checkpoint.error]??'처리가 중단되었습니다. 다시 시도해 주세요.'}</p>}{error&&<p role="alert" className="error-message">{error}</p>}
     {!!job?.usage.length&&<UsageSummary usage={job.usage}/>}
     <div className="dialog-actions"><button disabled={!job?.checkpoint.completed_stages?.includes('Structure')} onClick={onRead}>원문·대역 읽기</button>{active?<button disabled={busy} title={waiting?'제출한 요청을 취소합니다. 이미 끝난 결과는 보관됩니다.':undefined} onClick={()=>void action('pause')}>일시정지</button>:job&& (!['complete','review'].includes(job.status)||!job.checkpoint.completed_stages?.includes('Annotate'))&&<button className="primary-button" disabled={busy} onClick={()=>void action('resume',{...options,batch:!!options.batch&&!cli})}>{['complete','review'].includes(job.status)?'주석 이어서 만들기':job.status==='paused'||job.status==='failed'?'이어서 실행':'번역·주석 시작'}</button>}</div><small>창을 닫아도 처리는 백그라운드에서 계속되고, 화면 위쪽에 진행률이 표시됩니다. 앱을 종료하면 저장된 단계부터 다음 실행 때 재개합니다.</small>
-  </div></Modal>;
+  </div></Modal>{ocrDoc&&<OcrDialog doc={ocrDoc} onClose={()=>setOcrDoc(null)} onApplied={()=>{setOcrDoc(null);setRevision(value=>value+1);setEstimate(null);void request<typeof estimate>(`/documents/${docId}/estimate`).then(setEstimate).catch(()=>{});}}/>}</>;
 }

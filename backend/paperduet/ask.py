@@ -86,7 +86,7 @@ def paper_blocks(blocks):
     """The whole paper without AI notes; the section is named once per run."""
     result=[];section=None
     for b in blocks:
-        if b.note:continue
+        if b.note or b.superseded_by:continue
         item=compact(b)
         if b.section_path!=section:section=b.section_path;item['section']=' > '.join(section)
         result.append(item)
@@ -95,16 +95,17 @@ def paper_blocks(blocks):
 def build_context(store,request,settings):
     doc=store.document(request.doc_id)
     if not doc: raise ValueError('DOCUMENT_NOT_FOUND')
-    blocks=doc.blocks;by_id={b.id:b for b in blocks};block=by_id.get(request.anchor.block_id)
+    by_id={b.id:b for b in doc.blocks};block=by_id.get(request.anchor.block_id)
     if not block: raise ValueError('ANCHOR_NOT_FOUND')
+    blocks=[b for b in doc.blocks if not b.superseded_by or b.id==block.id]
     anchor=request.anchor
     if anchor.field=='document':
         # The block id only keeps compatibility with existing thread foreign keys.
         # A paper question has no selected block and always sees the source paper.
         if anchor.text or anchor.start or anchor.end: raise ValueError('SELECTION_CHANGED')
         context={'metadata':{'title':doc.title,'title_ko':doc.title_ko,'arxiv_id':doc.arxiv_id,'authors':doc.authors},
-            'abstract':[source_block(b) for b in blocks if any(p.lower()=='abstract' for p in b.section_path) and not b.note],
-            'glossary':[], 'section_path':[], 'headings':[source_block(b) for b in blocks if b.type in {'sec','sub','ssub'}],
+            'abstract':[source_block(b) for b in blocks if not b.superseded_by and any(p.lower()=='abstract' for p in b.section_path) and not b.note],
+            'glossary':[], 'section_path':[], 'headings':[source_block(b) for b in blocks if not b.superseded_by and b.type in {'sec','sub','ssub'}],
             'selection':anchor.model_dump(),'block':None,'neighbors':[],'references':[],
             'full_paper':paper_blocks(blocks),'image':None}
         return context,None

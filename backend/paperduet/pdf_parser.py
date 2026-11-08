@@ -18,7 +18,7 @@ fitz.no_recommend_layout()
 fitz.set_messages(pylogging=True, pylogging_level=50)
 fitz.TOOLS.mupdf_display_errors(False)
 fitz.TOOLS.mupdf_display_warnings(False)
-CAPTION = re.compile(r"^(Table|Figure|Fig\.)\s+(\d+[a-z]?)\s*[:.]\s*", re.I)
+CAPTION = re.compile(r"^(Table|Figure|Fig\.?)\s+([A-Z]?\s*\d+(?:\.\d+)*[a-z]?)\b(?:\s*([:.])\s*|\s+|$)", re.I)
 HEADING = re.compile(r"^((?:\d+(?:\.\d+){0,3}|[A-Z](?:\.\d+){0,3}))\.?\s+(.+)$")
 NUMBER = re.compile(r"^[+−-]?\d+(?:[.,]\d+)*%?$|^[-–—]$")
 
@@ -59,16 +59,55 @@ def inline_lines(lines):
     parts = []
     for line in lines:
         text = ""
+        spans = [s for s in line["spans"] if s["text"].strip()]
+        base_size = max((s["size"] for s in spans), default=0)
+        baseline_spans = [s for s in spans if s["size"] >= base_size * .9 and not s["flags"] & 1]
+        baseline = max(baseline_spans, key=lambda s: len(s["text"]), default={}).get("origin", (0, 0))[1]
         for s in line["spans"]:
             value = html.escape(s["text"], quote=False)
             if s["flags"] & 16:
                 value = f"<b>{value}</b>"
-            elif s["flags"] & 2:
+            if s["flags"] & 2:
                 value = f"<i>{value}</i>"
+            script = "sup" if s["flags"] & 1 else None
+            if not script and baseline_spans and s["size"] < base_size * .85 and s["text"].strip():
+                displacement = s.get("origin", (0, baseline))[1] - baseline
+                if displacement > base_size * .12:
+                    script = "sub"
+                elif displacement < -base_size * .12:
+                    script = "sup"
+            if script and s["text"].strip():
+                text = text.rstrip()
+                value = f"<{script}>{value.strip()}</{script}>"
             text += value
         parts.append(text.strip())
     # Preserve explicit hyphens rather than silently changing scientific terms.
     return " ".join(parts)
+
+
+def save_crop(page, region, path):
+    # About 288 dpi, with a bounded raster size even for unusually large pages.
+    scale = min(4, 3600 / max(region.width, region.height))
+    page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=region, alpha=False).save(path)
+
+
+def cluster_graphics(regions, padding=3):
+    """Join touching image tiles or vector paths without spanning prose gaps."""
+    result = []
+    for rect, segments in regions:
+        rect = fitz.Rect(rect)
+        changed = True
+        while changed:
+            changed = False
+            for index, (other, count) in enumerate(result):
+                if (rect + (-padding, -padding, padding, padding)).intersects(other):
+                    rect |= other
+                    segments += count
+                    result.pop(index)
+                    changed = True
+                    break
+        result.append((rect, segments))
+    return result
 
 
 SENTENCE_END = re.compile(r"[.!?:][\"'”’)\]]*$")
@@ -344,27 +383,65 @@ class PyMuPDFParser:
             for l in lines:
                 grouped.setdefault(l["block"],[]).append(l)
             captions=[]
+            caption_groups=[]
             for group in grouped.values():
+                left=[l for l in group if l['bbox'][2]<=width/2+8]
+                right=[l for l in group if l['bbox'][0]>=width/2-8]
+                # MuPDF can put two independent captions at the same height in
+                # one text block. Keep their labels and artwork associations apart.
+                if left and right and len(left)+len(right)==len(group) and CAPTION.match(left[0]['text']) and CAPTION.match(right[0]['text']):
+                    caption_groups.extend([left,right])
+                else:
+                    caption_groups.append(group)
+            for group in caption_groups:
                 text=" ".join(l["text"] for l in group)
                 match=CAPTION.match(text)
                 # A body sentence may also begin "Table 2. For the ...".
                 # Period-style captions use the smaller caption font in CV papers.
                 if match and not ('.' in text[:match.end()] and max(l['size'] for l in group)>body_size-.25 and len(text)>180):
                     captions.append({"kind":"tab" if match[1].lower()=="table" else "fig","n":("Table " if match[1].lower()=="table" else "Figure ")+match[2],
-                                     "bbox":list(union([l["bbox"] for l in group])),"text":text[match.end():].strip(),"group":group})
+                                     "bbox":list(union([l["bbox"] for l in group])),"text":text[match.end():].strip(),"group":group,
+                                     "punctuated":bool(match[3])})
             drawings=page.get_drawings()
-            graphics=[fitz.Rect(i["bbox"]) for i in page.get_image_info() if fitz.Rect(i["bbox"]).get_area()>80]
+            raster_graphics=[fitz.Rect(i["bbox"]) for i in page.get_image_info() if fitz.Rect(i["bbox"]).get_area()>80]
+            graphics=list(raster_graphics)
             graphics += [d["rect"] for d in drawings if d["rect"].width>8 and d["rect"].height>8 and d["rect"].height<height*.85]
             detected=page.find_tables().tables if any(c["kind"]=="tab" for c in captions) else []
+            two_column=sum(l['bbox'][0]>=width/2 and len(l['text'])>45 for l in lines)>2 and sum(l['bbox'][2]<width/2+8 and len(l['text'])>45 for l in lines)>2
+            def nearby(rect, cap, gap=60):
+                rect=fitz.Rect(rect)
+                return rect.x1>cap.x0 and rect.x0<cap.x1 and min(abs(rect.y1-cap.y0),abs(rect.y0-cap.y1))<gap
+            # Punctuation-free captions must have nearby artwork. Otherwise a
+            # sentence such as "Figure 1 shows ..." remains ordinary body text.
+            def supported_caption(caption):
+                if caption['punctuated']:
+                    return True
+                # Bare subject-verb references are ambiguous even beside a
+                # picture. Retain their text and preserve the artwork separately.
+                if re.match(r'^(?:shows?|illustrates?|compares?|presents?|describes?|demonstrates?|depicts?|summarizes?|contains?|gives?|provides?|reports?)\b',caption['text'],re.I):
+                    return False
+                cap=fitz.Rect(caption['bbox'])
+                return any(nearby(g,cap,40) for g in graphics) or (caption['kind']=='tab' and any(nearby(t.bbox,cap,40) for t in detected))
+            captions=[c for c in captions if supported_caption(c)]
             excluded=[]
             items=[]
             target.mkdir(parents=True,exist_ok=True)
             for ci,caption in enumerate(sorted(captions,key=lambda c:c["bbox"][1])):
                 cap=fitz.Rect(caption["bbox"])
-                column=fitz.Rect(0,0,width,height) if cap.width>width*.55 else fitz.Rect(0 if cap.x0<width/2 else width/2,0,width/2 if cap.x0<width/2 else width,height)
+                wide_artwork=any(fitz.Rect(g).width>width*.55 and nearby(g,cap) for g in graphics)
+                wide_artwork=wide_artwork or (caption['kind']=='tab' and any(fitz.Rect(t.bbox).width>width*.55 and nearby(t.bbox,cap) for t in detected))
+                column=fitz.Rect(0,0,width,height) if not two_column or cap.width>width*.55 or wide_artwork else fitz.Rect(0 if cap.x0<width/2 else width/2,0,width/2 if cap.x0<width/2 else width,height)
                 same_column=lambda r: (fitz.Rect(r)&column).width>=fitz.Rect(r).width*.8
                 founds=[t for t in detected if t.bbox[3]<=cap.y0+3 and cap.y0-t.bbox[3]<60 and fitz.Rect(t.bbox).width>60 and same_column(t.bbox)]
                 found=max(founds,key=lambda t:t.bbox[3],default=None) if caption["kind"]=="tab" else None
+                below=False
+                if caption['kind']=='tab':
+                    after=[t for t in detected if cap.y1-3<=t.bbox[1]<cap.y1+60 and fitz.Rect(t.bbox).width>60 and same_column(t.bbox)]
+                    following=min(after,key=lambda t:t.bbox[1],default=None)
+                    if following and (not found or following.bbox[1]-cap.y1<cap.y0-found.bbox[3]):
+                        found=following
+                        founds=after
+                        below=True
                 if found:
                     region=fitz.Rect(found.bbox)
                     # Adjacent detected fragments can be one captioned table.
@@ -380,6 +457,20 @@ class PyMuPDFParser:
                         body_before=[l["bbox"][3] for l in lines if l["bbox"][3]<nearest and same_column(l['bbox']) and l["size"]>=body_size-.5 and len(l["text"])>60 and not any(overlap(l["bbox"],g) for g in candidates)]
                         start=max(body_before or [previous])
                         candidates=[g for g in candidates if g.y1>start and g.y0>=start-2]
+                    # Captions may precede their artwork. Prefer a close lower
+                    # graphic only when no body paragraph lies between them.
+                    next_caption=min([c['bbox'][1] for c in captions if c is not caption and c['bbox'][1]>cap.y1 and same_column(c['bbox'])] or [height])
+                    after=[g for g in graphics if cap.y1-2<=g.y0<next_caption and g.y1<=next_caption and g.x1>cap.x0 and g.x0<cap.x1]
+                    nearest_after=min((g.y0 for g in after),default=height)
+                    barriers=[l['bbox'][1] for l in lines if same_column(l['bbox']) and l['bbox'][1]>=cap.y1 and l['bbox'][3]<=nearest_after and len(l['text'])>55 and l['size']>=body_size-.25]
+                    if after and nearest_after-cap.y1<55 and not barriers and (not candidates or nearest_after-cap.y1<cap.y0-max(g.y1 for g in candidates)):
+                        end=min([l['bbox'][1] for l in lines if same_column(l['bbox']) and l['bbox'][1]>nearest_after and len(l['text'])>55 and l['size']>=body_size-.25 and not any(overlap(l['bbox'],g) for g in after)] or [next_caption])
+                        candidates=[g for g in after if g.y0<end and g.y1<=end]
+                        below=True
+                    if not candidates and caption['kind']=='fig':
+                        # Do not invent a picture from an arbitrary prose crop.
+                        # Unmatched raster/vector artwork is retained below.
+                        continue
                     region=union(candidates) if candidates else fitz.Rect(cap.x0,max(previous,cap.y0-120),cap.x1,cap.y0-3)
                 if caption['kind']=='tab':
                     previous=max([c['bbox'][3] for c in captions if c['bbox'][3]<cap.y0 and same_column(c['bbox'])] or [height*.085])
@@ -392,7 +483,7 @@ class PyMuPDFParser:
                                 rules.append(fitz.Rect(min(part[1].x,part[2].x),part[1].y,max(part[1].x,part[2].x),part[1].y+.1))
                     if rules:
                         region |= union(rules)
-                if caption['kind']=='tab' and '.' in ' '.join(l['text'] for l in caption['group'])[:20]:
+                if caption['kind']=='tab' and (below or not found):
                     # Top captions are common in CVPR PDFs. Use rules from the
                     # same column and stop at the next genuine prose paragraph.
                     rules=[]
@@ -403,7 +494,7 @@ class PyMuPDFParser:
                                 if same_column(r) and r.width>cap.width*.65:rules.append(r)
                     after=sorted([r for r in rules if r.y0>=cap.y1-1],key=lambda r:r.y0)
                     before=sorted([r for r in rules if r.y1<=cap.y0+1],key=lambda r:r.y0)
-                    if after and after[0].y0-cap.y1<55 and (not before or after[0].y0-cap.y1<cap.y0-before[-1].y1):
+                    if after and after[0].y0-cap.y1<55 and (below or not before or after[0].y0-cap.y1<cap.y0-before[-1].y1):
                         start=after[0].y0
                         boundaries=[l['bbox'][1] for l in lines if same_column(l['bbox']) and l['bbox'][1]>start and len(l['text'])>55 and l['size']>body_size-.25]
                         boundaries += [c['bbox'][1] for c in captions if c is not caption and same_column(c['bbox']) and c['bbox'][1]>start]
@@ -412,20 +503,20 @@ class PyMuPDFParser:
                         region=union(relevant)
                         # Include header text above the first rule, below caption.
                         top=[l['bbox'][1] for l in lines if same_column(l['bbox']) and cap.y1<l['bbox'][1]<region.y1]
-                        region.y0=min(top or [region.y0])-2
+                        region.y0=min([region.y0]+top)-2
                         region.y1+=2
                         found=next((t for t in detected if overlap(t.bbox,region) and fitz.Rect(t.bbox).width>region.width*.9),None)
                 if caption['kind']=='fig':
                     # Axes and legend labels can lie outside vector/image bounds.
-                    labels=[l['bbox'] for l in lines if same_column(l['bbox']) and region.y0-8<=l['bbox'][1] and l['bbox'][3]<=min(cap.y0-2,region.y1+8) and l['size']<body_size]
+                    labels=[l['bbox'] for l in lines if same_column(l['bbox']) and region.y0-8<=l['bbox'][1] and l['bbox'][3]<=(region.y1+8 if below else min(cap.y0-2,region.y1+8)) and l['size']<body_size]
                     if labels: region |= union(labels)
                 region &= page.rect
-                region &= column
+                # Columns guide association, but real artwork can extend into
+                # the gutter. Do not cut pixels off its already-selected bounds.
                 if region.is_empty:
                     continue
                 filename=f"p{page_number+1:04d}-{caption['kind']}-{ci}.png"
-                scale=min(2,1800/max(region.width,region.height))
-                page.get_pixmap(matrix=fitz.Matrix(scale,scale),clip=region,alpha=False).save(target/filename)
+                save_crop(page,region,target/filename)
                 item={"type":caption["kind"],"n":caption["n"],"caption_en":html.escape(caption["text"]),"bbox":list(region|cap),
                       "crop":filename,"region":list(region),"page":page_number+1}
                 if caption["kind"]=="tab":
@@ -443,7 +534,6 @@ class PyMuPDFParser:
                 items.append(item)
             # Equation labels occupy the right margin; collect adjacent mathematical
             # lines instead of flattening their fragments into prose.
-            two_column=sum(l['bbox'][0]>=width/2 and len(l['text'])>45 for l in lines)>2 and sum(l['bbox'][2]<width/2+8 and len(l['text'])>45 for l in lines)>2
             def prose_line(l):
                 return (l['text'].endswith(':') and bool(re.search('[a-zA-Z]{3}',l['text']))) or len(re.findall(r'[A-Za-z]{3,}',l['text']))>=4 or (bool(re.match(r'[A-Za-z][a-z]{2,}\s',l['text'])) and len(re.findall(r'[A-Za-z]{2,}',l['text']))>=3) or (l['bold'] and bool(HEADING.match(l['text'])))
             for line in lines:
@@ -459,9 +549,33 @@ class PyMuPDFParser:
                     if not math_lines:continue
                     region=union([l["bbox"] for l in math_lines])
                     filename=f"p{page_number+1:04d}-eq-{label[1]}.png"
-                    page.get_pixmap(matrix=fitz.Matrix(2,2),clip=region+(-3,-3,3,3),alpha=False).save(target/filename)
+                    save_crop(page,region+(-3,-3,3,3),target/filename)
                     items.append({"type":"eq","n":'('+label[1]+')',"en":inline_lines(math_lines),"bbox":list(region),"region":list(region),"crop":filename,"page":page_number+1,"needs_restore":True})
                     excluded.append(list(region))
+            # Captions are useful metadata, not a prerequisite for preserving
+            # actual artwork. Ignore tiny glyph images and simple page rules.
+            unclaimed=[g for g in raster_graphics if not any(overlap(g,r) for r in excluded)]
+            standalone=[r for r,_ in cluster_graphics([(g,0) for g in unclaimed]) if r.width>=24 and r.height>=24 and r.get_area()>=900]
+            vector_paths=[]
+            for drawing in drawings:
+                segments=sum(p[0] in {'l','c','qu'} for p in drawing['items'])
+                rect=fitz.Rect(drawing['rect'])+(-.5,-.5,.5,.5)
+                if segments and max(rect.width,rect.height)>20 and not any(overlap(rect,r) for r in excluded):
+                    vector_paths.append((rect,segments))
+            for rect,count in cluster_graphics(vector_paths):
+                if count>=3 and rect.width>=24 and rect.height>=24 and rect.get_area()>=900 and rect.get_area()<page.rect.get_area()*.75:
+                    # Background boxes, paragraph underlines and text panels
+                    # must not replace ordinary source paragraphs with pictures.
+                    if not any(sum(len(l['text']) for l in group if overlap(l['bbox'],rect) and l['size']>=body_size-.25)>55 for group in grouped.values()):
+                        standalone.append(rect)
+            for index,region in enumerate(sorted(standalone,key=lambda rect:rect.get_area(),reverse=True)):
+                region &= page.rect
+                if region.is_empty or any(overlap(region,r) for r in excluded):
+                    continue
+                filename=f'p{page_number+1:04d}-fig-unlabelled-{index}.png'
+                save_crop(page,region,target/filename)
+                items.append({'type':'fig','bbox':list(region),'region':list(region),'crop':filename,'page':page_number+1})
+                excluded.append(list(region))
             for group in grouped.values():
                 # Split at the column gutter even if MuPDF grouped both columns.
                 remaining=[l for l in group if not any(overlap(l["bbox"],r) for r in excluded)]

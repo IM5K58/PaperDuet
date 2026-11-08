@@ -11,6 +11,9 @@ import { primaryKey, shortcut } from './platform';
 import { ReadingContent, ReadingProgress, type ProgressHandle, type ReadingHandle } from './reading-content';
 import { Notebook } from './notebook';
 import { ReadingSettings } from './reading-settings';
+import { ReanalysisDialog } from './reanalysis';
+import { DiagnosticsDialog, SourceComparison, type SourceTarget } from './diagnostics';
+import { OcrDialog } from './ocr';
 import './styles/book.css';
 import type { Block, Document, NoteKind, Settings, View } from './types';
 
@@ -21,6 +24,9 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
   const ask=useAsk(doc,!offline);
   const askImage=useCallback((block:Block)=>ask.open({kind:'figure',blockId:block.id}),[ask.open]);
   const [pdfOpen,setPdfOpen]=useState(false);
+  const [reanalysisOpen,setReanalysisOpen]=useState(false),[reanalysisNotice,setReanalysisNotice]=useState('');
+  const [diagnosticsOpen,setDiagnosticsOpen]=useState(false),[sourceTarget,setSourceTarget]=useState<SourceTarget|null>(null);
+  const [ocrPages,setOcrPages]=useState<number[]|null>(null);
   const [settings, setSettings] = useState<Settings>(() => ({ ...INITIAL, theme: resolveTheme() }));
   const [error, setError] = useState('');
   const [saveError, setSaveError] = useState(false);
@@ -90,7 +96,7 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
       void request('/settings/reader',{method:'PUT',body:JSON.stringify(latestSettings.current),keepalive:true}).catch(()=>{});
   },[]);
 
-  const headings = useMemo(() => doc?.blocks.filter(b => ['sec', 'sub', 'ssub'].includes(b.type)) ?? [], [doc]);
+  const headings = useMemo(() => doc?.blocks.filter(b => !b.superseded_by && ['sec', 'sub', 'ssub'].includes(b.type)) ?? [], [doc]);
   const evidence = useMemo(()=>new Map(doc?.blocks.filter(b=>!b.note).map(b=>[b.id,b.n||`${b.section_path.at(-1)||'본문'} · ${b.id}`])??[]),[doc]);
   const refreshDoc = async () => {setDoc(await request<Document>(`/documents/${docId}`));};
   const shownBlocks = useMemo(() => doc?.blocks.filter(b => !b.note || (
@@ -108,6 +114,7 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
   const jump = useCallback((id: string, offset = 0) => {
     const element = document.getElementById(id);
     if (element) {
+      element.querySelector('details.previous-source-details')?.setAttribute('open','');
       reading.current?.jump(id,offset);
       history.replaceState(null, '', `${location.pathname}${location.search}#${id}`);
     }
@@ -231,6 +238,7 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
       <span role="status">{matches.length ? `${Math.min(matchIndex + 1, matches.length)} / ${matches.length}` : '0건'}</span><button onClick={() => findMatch(matchIndex - 1)} disabled={!matches.length} aria-label="이전 검색 결과"><Icon name="chevronUp"/></button><button onClick={() => findMatch(matchIndex + 1)} disabled={!matches.length} aria-label="다음 검색 결과"><Icon name="chevronDown"/></button><button className="icon-button" onClick={() => setSearchOpen(false)} aria-label="검색 닫기"><Icon name="close"/></button></div>}
     </header>
     {saveError && <div className="save-warning" role="status">읽기 설정 저장을 기다리고 있습니다. 로컬 연결이 복구되면 다시 시도해 주세요.</div>}
+    {reanalysisNotice && <div className="reanalysis-result" role="status">{reanalysisNotice}<button className="icon-button" aria-label="분석 결과 알림 닫기" onClick={()=>setReanalysisNotice('')}><Icon name="close"/></button></div>}
     <nav id="toc" ref={drawerRef} className={`toc ${drawer ? 'open' : ''}`} aria-label="목차" aria-hidden={!drawer} inert={!drawer} onKeyDown={e => { if (e.key === 'Escape') setDrawer(false); }}>
       <div className="toc-heading"><b>목차</b><button className="icon-button drawer-close" aria-label="목차 닫기" onClick={() => setDrawer(false)}><Icon name="close"/></button></div>
       <div className="toc-scroll" ref={tocScrollRef}>
@@ -244,17 +252,21 @@ export function App({docId,onLibrary,onProcess,onTutorial,offline=false}:{docId:
     <main id="paper" className="book-main">
     <div className="book-subbar">{!offline&&<><div className="reader-tabs" role="tablist" aria-label="보기">{([['paper','본문'],['summary','요약']] as const).map(([id,name])=><button key={id} role="tab" aria-selected={tab===id} onClick={()=>switchTab(id)}>{name}</button>)}</div><DocumentActions doc={doc}/></>}
       <details className="reader-more"><summary className="icon-button" aria-label="논문 정보"><Icon name="more"/></summary><div><b>{doc.title}</b><p>{doc.authors}</p><p>{doc.page_count}쪽{doc.arxiv_id&&` · arXiv ${doc.arxiv_id}`}</p>
-        {!offline&&doc.status!=='fixture'&&<div className="document-status"><span>{doc.untranslated_count===0?'번역 완료':doc.untranslated_count!==undefined?`번역 ${doc.translated_count??0}개 · 미번역 ${doc.untranslated_count}개`:doc.status==='complete'||doc.status==='review'?'번역 완료':'미번역'}</span><button onClick={onProcess}>처리 상태·번역·주석</button>{doc.source_kind!=='arxiv_html'&&<button onClick={()=>setPdfOpen(true)}>원본 PDF 보기</button>}</div>}
+        {!offline&&doc.status!=='fixture'&&<div className="document-status"><span>{doc.untranslated_count===0?'번역 완료':doc.untranslated_count!==undefined?`번역 ${doc.translated_count??0}개 · 미번역 ${doc.untranslated_count}개`:doc.status==='complete'||doc.status==='review'?'번역 완료':'미번역'}</span><button onClick={onProcess}>처리 상태·번역·주석</button><button onClick={event=>{if(doc.source_kind==='arxiv_html'){const menu=event.currentTarget.closest('details.reader-more');menu?.removeAttribute('open');menu?.querySelector<HTMLElement>('summary')?.focus();setSourceTarget({});}else setPdfOpen(true);}}>원본 PDF 보기</button><button onClick={event=>{const menu=event.currentTarget.closest('details.reader-more');menu?.removeAttribute('open');menu?.querySelector<HTMLElement>('summary')?.focus();setDiagnosticsOpen(true);}}>누락 진단</button><button onClick={event=>{const menu=event.currentTarget.closest('details.reader-more');menu?.removeAttribute('open');menu?.querySelector<HTMLElement>('summary')?.focus();setOcrPages([]);}}>스캔 페이지 글자 읽기</button><button onClick={event=>{const menu=event.currentTarget.closest('details.reader-more');menu?.removeAttribute('open');menu?.querySelector<HTMLElement>('summary')?.focus();setReanalysisOpen(true);}}>원문 다시 분석</button></div>}
         {!!doc.glossary.length&&<details><summary>용어집 · {doc.glossary.length}개</summary><dl>{doc.glossary.map(g=><div key={g.term}><dt>{g.term} · {g.ko}</dt><dd>{g.definition_ko}</dd></div>)}</dl></details>}
         <button aria-label="현재 위치 링크 복사" onClick={async()=>{try{await navigator.clipboard.writeText(`#${latestPosition.current.block_id??doc.blocks[0]?.id}`);setCopy('복사됨');}catch{setCopy('복사 실패');}}}>{copy||'현재 위치 링크 복사'}</button><button aria-label="맨 위로" onClick={()=>{reading.current?.first();history.replaceState(null,'',`${location.pathname}${location.search}`);}}>처음으로</button>
       </div></details>
     </div>
     {tab==='summary'?<div className="book-summary"><SummaryView doc={doc} labels={evidence} onJump={goToBlock}/></div>:<ReadingContent ref={reading} blocks={shownBlocks} position={latestPosition.current} layoutKey={JSON.stringify(settings)} onPosition={onPosition}>
       <section className="book-intro"><span className="eyebrow">{doc.arxiv_id?`arXiv ${doc.arxiv_id}`:'PaperDuet'}</span><h1>{doc.title}</h1>{doc.title_ko&&<h2>{doc.title_ko}</h2>}<p>{doc.authors||(doc.page_count?`${doc.page_count}쪽`:'샘플 논문')}</p>{offline&&<p className="export-notice">독립 HTML · 오프라인 열람용</p>}</section>
-      {shownBlocks.map(b => <div key={b.id} className={`reader-block-wrap ${['sec','sub','ssub'].includes(b.type)?'heading-block':''}`}><ReaderBlock block={b} evidence={evidence} onAskImage={offline?undefined:askImage} />{!offline&&doc.status!=='fixture'&&!b.section_path.some(p=>/^(references|bibliography)$/i.test(p))&&<BlockTools block={b} onUpdate={refreshDoc}/>}</div>)}
+      {shownBlocks.map(b => <div key={b.id} className={`reader-block-wrap ${!b.superseded_by&&['sec','sub','ssub'].includes(b.type)?'heading-block':''}`}><ReaderBlock block={b} evidence={evidence} onAskImage={offline?undefined:askImage} />{!offline&&doc.status!=='fixture'&&!b.note&&<div className="source-block-actions"><button className="source-compare-button" onClick={()=>setSourceTarget({blockId:b.id})}>원문 대조</button></div>}{!offline&&doc.status!=='fixture'&&!b.superseded_by&&!b.section_path.some(p=>/^(references|bibliography)$/i.test(p))&&<BlockTools block={b} onUpdate={refreshDoc}/>}</div>)}
     </ReadingContent>}
     </main>
     {pdfOpen&&<PdfPreview docId={doc.id} pages={doc.page_count} onClose={()=>setPdfOpen(false)} onProcess={()=>onProcess?.()}/>}
+    {reanalysisOpen&&!offline&&doc.status!=='fixture'&&<ReanalysisDialog doc={doc} onClose={()=>setReanalysisOpen(false)} onApplied={value=>{setDoc(value.document);setReanalysisOpen(false);setReanalysisNotice(`원문 ${value.applied}개를 반영했습니다. 기존 번역과 메모는 보존했습니다.`);}}/>}
+    {diagnosticsOpen&&!offline&&doc.status!=='fixture'&&<DiagnosticsDialog doc={doc} onClose={()=>setDiagnosticsOpen(false)} onCompare={target=>{setDiagnosticsOpen(false);setSourceTarget(target);}} onJump={id=>{setDiagnosticsOpen(false);goToBlock(id);}} onProcess={onProcess?()=>{setDiagnosticsOpen(false);onProcess();}:undefined} onReanalysis={()=>{setDiagnosticsOpen(false);setReanalysisOpen(true);}} onOcr={page=>{setDiagnosticsOpen(false);setOcrPages(page?[page]:[]);}}/>}
+    {sourceTarget&&!offline&&doc.status!=='fixture'&&<SourceComparison doc={doc} target={sourceTarget} onClose={()=>setSourceTarget(null)} onJump={id=>{setSourceTarget(null);goToBlock(id);}}/>}
+    {ocrPages&&!offline&&doc.status!=='fixture'&&<OcrDialog doc={doc} initialPages={ocrPages} onClose={()=>setOcrPages(null)} onApplied={value=>{setDoc(value.document);setOcrPages(null);setReanalysisNotice(`글자 읽기 원문 ${value.applied}개를 반영했습니다. 기존 번역과 메모는 보존했습니다.`);}}/>}
     {ask.selected&&<SelectionActions anchor={ask.selected} onOpen={anchor=>ask.open({kind:'text',anchor})}/>}
     {ask.opened&&!offline&&<AskPanel key={doc.id} doc={doc} selection={ask.anchor} visible={ask.visible} activation={ask.activation} onClose={ask.close} onSaved={refreshDoc}/>}
     {!offline&&<div className="reader-assistant-dock" role="toolbar" aria-label="보조 기능"><button aria-pressed={ask.visible} onClick={()=>ask.open()}><Icon name="message"/>Ask AI</button><span aria-hidden="true"/><button aria-pressed={memos} onClick={()=>setMemos(v=>!v)}><Icon name="notebook"/>메모장</button></div>}

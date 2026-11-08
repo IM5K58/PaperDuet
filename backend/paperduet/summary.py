@@ -61,7 +61,7 @@ def text_of(value, limit=2000):
 
 def evidence_blocks(doc, sources):
     """Blocks a summary may cite: the paper's own content, not references or AI notes."""
-    return {b.id: b for b in doc.blocks if not b.note and b.id in sources and not sources[b.id].get('references')}
+    return {b.id: b for b in doc.blocks if not b.note and not b.superseded_by and b.id in sources and not sources[b.id].get('references')}
 
 
 def check_point(item, evidence):
@@ -117,7 +117,7 @@ def section_name(doc, batch):
     path = batch[0].section_path
     if not path:
         return '앞부분'
-    heading = next((b for b in doc.blocks if b.type == 'sec' and b.section_path == path[:1]), None)
+    heading = next((b for b in doc.blocks if not b.superseded_by and b.type == 'sec' and b.section_path == path[:1]), None)
     title = text_of(heading.en, 200) if heading else ''
     return f'{path[0]} {title}'.strip() if title and title.lower() != path[0].lower() else path[0]
 

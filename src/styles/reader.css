@@ -5,6 +5,8 @@ article { min-width:0; }
 [data-block] { position:relative; scroll-margin-top:calc(var(--s-section) + var(--s-lg)); min-width:0; overflow-wrap:anywhere; }
 .parallel { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--s-xl); margin:var(--s-xs) 0; align-items:start; border-radius:var(--r-sm); }
 .parallel > .en,.parallel > .ko { padding:var(--s-xs) 0; }
+.parallel.ocr-paragraph { row-gap:var(--s-xxs); }
+.ocr-source-label { grid-column:1/-1; color:var(--text-muted); font-family:var(--sans); font-size:var(--t-caption); line-height:1.4; }
 @media (hover:hover) {
   .parallel { transition:background-color .15s,box-shadow .15s; }
   .reader-block-wrap:hover > .parallel { background:var(--pair); box-shadow:0 0 0 10px var(--pair); }

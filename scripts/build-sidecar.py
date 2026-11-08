@@ -20,6 +20,7 @@ def main():
     version=int(re.search(r'^SCHEMA_VERSION\s*=\s*(\d+)',(package/'store.py').read_text(encoding='utf-8'),re.M)[1])
     migrations=[package/f'migration_{step}.sql' for step in range(2,version+1)]
     if any(not path.is_file() for path in migrations):raise RuntimeError('A required database migration is missing.')
+    subprocess.run([sys.executable, str(ROOT/'scripts/check-ocr-data.py')], cwd=ROOT, check=True)
     build=ROOT/'build';build.mkdir(exist_ok=True)
     # CLI process isolation is Windows-only in the first macOS beta.
     policy=build/'build_policy.json';policy.write_text(json.dumps({'cli_enabled':False}),encoding='utf-8')

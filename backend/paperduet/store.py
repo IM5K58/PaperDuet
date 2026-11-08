@@ -10,7 +10,7 @@ from .validation import translation_complete
 
 # The newest database version this app reads. A new migration_N.sql raises it to N;
 # the sidecar build bundles every migration_*.sql and checks that 2..N all exist.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 class Store:
@@ -75,7 +75,7 @@ class Store:
                 decorate_tables(blocks)  # Existing M1 documents also work offline.
             references={r['block_id'] for r in db.execute('SELECT block_id,provenance FROM source_blocks WHERE doc_id=?',(doc_id,))
                         if json.loads(r['provenance']).get('references')}
-            targets=[b for b in blocks if not b.note and b.id not in references
+            targets=[b for b in blocks if not b.note and not b.superseded_by and b.id not in references
                      and not any(p.lower() in {'references','bibliography'} for p in b.section_path)
                      and (b.type in {'sec','sub','ssub','p','li'} or b.caption_en or b.table)]
             translated=sum(translation_complete(b) for b in targets)

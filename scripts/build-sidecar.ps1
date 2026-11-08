@@ -4,6 +4,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
 $pythonExe = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $pythonExe)) { throw 'Run scripts/setup.ps1 first.' }
+& $pythonExe scripts/check-ocr-data.py
+if ($LASTEXITCODE -ne 0) { throw 'Bundled OCR data validation failed.' }
 $policyPath = Join-Path $projectRoot 'build\build_policy.json'
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $policyPath) | Out-Null
 [IO.File]::WriteAllText($policyPath, (@{ cli_enabled = -not $DisableCli.IsPresent } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
