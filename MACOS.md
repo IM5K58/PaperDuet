@@ -1,6 +1,6 @@
 # macOS 베타 개발 및 검증
 
-현재 macOS 지원은 **macOS 14 이상, Apple Silicon 우선**인 소스 단계 베타입니다. Windows 버전과 같은 React 화면·Python 처리·SQLite 형식을 사용합니다. Windows 환경에서 플랫폼 경계와 WebKit을 검사할 수 있지만, macOS 네이티브 앱 실행과 키체인 권한 확인을 대체하지는 않습니다. 이 문서를 추가한 시점에는 맥 CI와 실기기 검증이 아직 실행되지 않았습니다.
+현재 macOS 지원은 **macOS 14 이상, Apple Silicon 우선**인 소스 단계 베타입니다. Windows 버전과 같은 React 화면·Python 처리·SQLite 형식을 사용합니다. GitHub Actions에서 맥 자동 테스트·앱 빌드·서명 및 내장 백엔드 검증을 실행합니다. Windows에서의 플랫폼 검사나 자동 테스트는 실제 Mac에서의 앱 실행과 키체인 권한 확인을 대체하지는 않습니다.
 
 ## 지원 범위
 
@@ -56,6 +56,10 @@ macOS 전용 Playwright 검증은 공개 저장소에 없는 샘플 대신 작�
 실제 키체인 권한까지 검사하려면 Mac에서 `PAPERDUET_TEST_KEYCHAIN=1 npm run test:backend -- -k native_macos_keychain_roundtrip`을 실행합니다. 임의 이름의 테스트 항목 하나만 생성·조회·삭제하며 실제 앱의 API 키는 읽거나 수정하지 않습니다. OS 권한 창이 나올 수 있어 CI에서는 기본적으로 건너뜁니다.
 
 `.github/workflows/macos.yml`은 macOS 15 arm64 러너에서 의존성 설치, 백엔드·프로세스 수명 테스트, WebKit/Chromium 테스트, app/DMG 빌드, 서명 확인, 앱 내부 사이드카 스모크를 실행합니다. 현재 Playwright와 macOS 14용 고정 WebKit 사이의 [페이지 초기화 호환성 문제](https://github.com/microsoft/playwright/issues/42964) 때문에 CI는 macOS 15를 사용합니다. 앱의 배포 대상 설정은 macOS 14 이상이며, macOS 14에서의 실제 실행 여부는 별도로 확인해야 합니다. 결과는 Actions 아티팩트로만 보관하며 릴리스 게시·업로드는 하지 않습니다. 커밋·푸시하거나 해당 워크플로를 실행하기 전에는 원격 검증이 실행되지 않습니다.
+
+CI에서는 앱 빌드·검증과 DMG 포장을 분리합니다. 검증된 앱은 심볼릭 링크와 실행 권한을 보존하는 `PaperDuet-macOS-arm64-beta.zip`으로 먼저 보관합니다. DMG 포장은 화면 조작 없이 실행하고, 실패하면 재컴파일 없이 최대 3회 시도합니다. 계속 실패하면 작업은 실패로 남으며, 각 시도의 상세 로그(`dmg-bundle-attempt-*.log`)와 앱 ZIP은 Actions의 `PaperDuet-macOS-arm64-beta` 아티팩트에서 받을 수 있습니다. 생성된 DMG도 `hdiutil verify`로 검사하고, 포장 후 앱 서명을 다시 확인합니다.
+
+`skipping app notarization`은 현재 ad-hoc 베타에 Apple 공증 자격 증명을 설정하지 않았다는 경고입니다. DMG 생성 실패의 세부 원인은 그 뒤의 `bundle_dmg.sh` 상세 로그에서 확인해야 합니다. 앱 ZIP도 공증된 정식 배포본은 아니며, DMG와 동일하게 테스트용으로 취급합니다.
 
 공개 전 실제 Mac에서 Finder로 앱 열기, 키체인 저장/조회/삭제·권한 거절, 한글 입력, PDF 드롭, 목차·선택·그림 질문·창 조절, 저장/내보내기 다이얼로그, 앱 종료/강제 종료 후 남은 백엔드가 없는지 확인해야 합니다. Playwright WebKit은 실제 WKWebView와 OS 권한 검사의 대체 수단이 아닙니다.
 

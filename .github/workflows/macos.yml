@@ -51,12 +51,39 @@ jobs:
           npx playwright install chromium webkit
       - name: WebKit and Chromium UI checks
         run: npx playwright test --config playwright.macos.config.ts
-      - name: Build ad-hoc signed app and DMG
-        run: npx tauri build --bundles app,dmg
+      - name: Build ad-hoc signed app
+        run: npx tauri build --bundles app --verbose
       - name: Verify app signature and embedded backend
         run: |
           codesign --verify --deep --strict src-tauri/target/release/bundle/macos/PaperDuet.app
           .venv/bin/python scripts/smoke-sidecar.py src-tauri/target/release/bundle/macos/PaperDuet.app/Contents/Resources/backend/paperduet-backend
+      - name: Archive verified app for beta testing
+        # Preserve symlinks and executable permissions inside the uploaded ZIP.
+        run: ditto -c -k --sequesterRsrc --keepParent src-tauri/target/release/bundle/macos/PaperDuet.app src-tauri/target/release/bundle/macos/PaperDuet-macOS-arm64-beta.zip
+      - name: Package DMG with bounded retries
+        shell: bash
+        env:
+          # Keep Finder/AppleScript layout disabled on the headless runner.
+          CI: 'true'
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'false'
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::DMG packaging attempt $attempt/3"
+            if npx tauri bundle --bundles dmg --verbose 2>&1 | tee "dmg-bundle-attempt-$attempt.log"; then
+              echo "::endgroup::"
+              hdiutil verify src-tauri/target/release/bundle/dmg/*.dmg
+              # Bundling can recreate and re-sign the .app; verify it again.
+              codesign --verify --deep --strict src-tauri/target/release/bundle/macos/PaperDuet.app
+              exit 0
+            fi
+            echo "::endgroup::"
+            hdiutil info || true
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::DMG packaging failed after 3 attempts. See dmg-bundle-attempt-*.log."
+              exit 1
+            fi
+            sleep "$((attempt * 10))"
+          done
       - name: Upload beta and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,6 +91,8 @@ jobs:
           name: PaperDuet-macOS-arm64-beta
           path: |
             src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.zip
+            dmg-bundle-attempt-*.log
             playwright-report/
             test-results/
           if-no-files-found: warn
